@@ -3,7 +3,8 @@
 # =============================================================================
 
 import feedparser
-from typing import Any
+import dateutil.parser
+from typing import Any, Optional
 from datetime import datetime, timedelta
 from readonlyai.utils import is_valid_webpage_url
 from readonlyai.database import create_database, insert_article
@@ -18,6 +19,20 @@ RSS_FEEDS = {
 }
 
 
+def parse_date_fallback(date_string: Optional[str]) -> Optional[datetime]:
+    """Fallback date parsing for when feedparser fails"""
+    if not date_string:
+        return None
+
+    try:
+        # Use dateutil.parser which handles most RSS date formats
+        parsed_date = dateutil.parser.parse(date_string)
+        # Convert to naive datetime (remove timezone info for comparison)
+        return parsed_date.replace(tzinfo=None)
+    except:
+        return None
+
+
 def get_rss_posts(
     source_name: str, rss_url: str, hours_back: int
 ) -> list[dict[str, Any]]:
@@ -27,23 +42,26 @@ def get_rss_posts(
     cutoff_time = datetime.now() - timedelta(hours=hours_back)
 
     for entry in feed.entries:
-        # Try different date formats
         published_time = None
-        for date_field in ["published", "updated"]:
-            if hasattr(entry, date_field):
+
+        # First try feedparser's already-parsed times (most reliable)
+        for time_field in ["published_parsed", "updated_parsed"]:
+            if hasattr(entry, time_field) and getattr(entry, time_field):
                 try:
-                    published_time = datetime.strptime(
-                        getattr(entry, date_field), "%Y-%m-%dT%H:%M:%S%z"
-                    ).replace(tzinfo=None)
+                    time_struct = getattr(entry, time_field)
+                    published_time = datetime(*time_struct[:6])
                     break
                 except:
-                    try:
-                        published_time = datetime.strptime(
-                            getattr(entry, date_field), "%a, %d %b %Y %H:%M:%S %Z"
-                        )
+                    continue
+
+        # Only if feedparser couldn't parse it, try manual parsing
+        if not published_time:
+            for date_field in ["published", "updated", "created"]:
+                if hasattr(entry, date_field):
+                    date_string = getattr(entry, date_field)
+                    published_time = parse_date_fallback(date_string)
+                    if published_time:
                         break
-                    except:
-                        continue
 
         if published_time and published_time >= cutoff_time:
             article_url = entry.link
