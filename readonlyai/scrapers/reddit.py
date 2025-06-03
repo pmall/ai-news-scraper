@@ -7,7 +7,7 @@ import praw
 from typing import Any
 from datetime import datetime, timedelta
 from readonlyai.utils import is_valid_webpage_url
-from readonlyai.database import DATABASE_PATH, create_database, insert_article
+from readonlyai.database import create_database, insert_article
 
 # Reddit configuration
 REDDIT_SUBREDDITS = [
@@ -72,7 +72,7 @@ def run_reddit_scraper(hours_back: int):
 
     try:
         # Initialize database
-        create_database(DATABASE_PATH)
+        create_database()
 
         reddit = setup_reddit()
         total_new_posts = 0
@@ -83,7 +83,6 @@ def run_reddit_scraper(hours_back: int):
 
             for post in posts:
                 inserted = insert_article(
-                    db_path=DATABASE_PATH,
                     parser="reddit",
                     source="reddit",
                     id=post["id"],

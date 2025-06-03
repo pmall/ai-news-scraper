@@ -6,7 +6,7 @@ import os
 from google import genai
 from pathlib import Path
 from datetime import datetime
-from readonlyai.database import DATABASE_PATH, create_database, get_recent_articles
+from readonlyai.database import create_database, get_recent_articles
 
 
 def generate_summary_with_sources(articles: list) -> str:
@@ -79,10 +79,10 @@ def run_summary_generator(hours_back: int):
 
     try:
         # Initialize database
-        create_database(DATABASE_PATH)
+        create_database()
 
         # Get recent articles
-        articles = get_recent_articles(DATABASE_PATH, hours_back)
+        articles = get_recent_articles(hours_back)
 
         if not articles:
             print("No articles found in database!")

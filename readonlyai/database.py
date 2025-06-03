@@ -1,59 +1,81 @@
 #!/usr/bin/env python3
 """
 Database setup for AI News Parser
-Creates and manages SQLite database for storing scraped articles
+Creates and manages SQLite/PostgreSQL database for storing scraped articles
 """
 
-import sqlite3
+import os
 import hashlib
 from urllib.parse import urlparse, parse_qs, urlencode
 from typing import Optional
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 
-# Database path
-DATABASE_PATH = "ai_news.db"
+# Database configuration from environment variables
+DATABASE_TYPE = os.getenv("DATABASE_TYPE", "sqlite")  # sqlite or postgresql
+DATABASE_PATH = os.getenv("DATABASE_PATH", "ai_news.db")  # for sqlite only
+DATABASE_URL = os.getenv("DATABASE_URL")  # for postgresql only
 
 
-def create_database(db_path: str = "ai_news.db") -> None:
-    """Create the SQLite database and table if they don't exist"""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+def get_database_engine():
+    """Get SQLAlchemy engine based on environment configuration"""
+    if DATABASE_TYPE.lower() == "postgresql":
+        if not DATABASE_URL:
+            raise ValueError("DATABASE_URL must be set when using PostgreSQL")
+        return create_engine(DATABASE_URL)
+    else:
+        # Default to SQLite
+        return create_engine(f"sqlite:///{DATABASE_PATH}")
 
-    # Create the articles table with exact schema specified
-    cursor.execute(
+
+def create_database() -> None:
+    """Create the database and table if they don't exist"""
+    engine = get_database_engine()
+
+    with engine.connect() as conn:
+        # Create the articles table with exact schema specified
+        conn.execute(
+            text(
+                """
+            CREATE TABLE IF NOT EXISTS articles (
+                parser TEXT NOT NULL,
+                source TEXT NOT NULL,
+                id TEXT NOT NULL,
+                subset TEXT,
+                thread_url TEXT,
+                title TEXT,
+                content TEXT,
+                date TEXT,
+                article_id TEXT,
+                article_url TEXT,
+                PRIMARY KEY (source, id)
+            )
         """
-        CREATE TABLE IF NOT EXISTS articles (
-            parser TEXT NOT NULL,
-            source TEXT NOT NULL,
-            id TEXT NOT NULL,
-            subset TEXT,
-            thread_url TEXT,
-            title TEXT,
-            content TEXT,
-            date TEXT,
-            article_id TEXT,
-            article_url TEXT,
-            PRIMARY KEY (source, id)
+            )
         )
-    """
-    )
 
-    # Create index on article_id for faster lookups when generating summaries
-    cursor.execute(
+        # Create index on article_id for faster lookups when generating summaries
+        conn.execute(
+            text(
+                """
+            CREATE INDEX IF NOT EXISTS idx_article_id ON articles (article_id)
         """
-        CREATE INDEX IF NOT EXISTS idx_article_id ON articles (article_id)
-    """
-    )
+            )
+        )
 
-    # Create index on date for faster time-based queries
-    cursor.execute(
+        # Create index on date for faster time-based queries
+        conn.execute(
+            text(
+                """
+            CREATE INDEX IF NOT EXISTS idx_date ON articles (date)
         """
-        CREATE INDEX IF NOT EXISTS idx_date ON articles (date)
-    """
-    )
+            )
+        )
 
-    conn.commit()
-    conn.close()
-    print(f"Database initialized: {db_path}")
+        conn.commit()
+
+    db_info = DATABASE_URL if DATABASE_TYPE.lower() == "postgresql" else DATABASE_PATH
+    print(f"Database initialized ({DATABASE_TYPE}): {db_info}")
 
 
 def generate_article_id(url: str) -> str:
@@ -107,7 +129,6 @@ def generate_article_id(url: str) -> str:
 
 
 def insert_article(
-    db_path: str,
     parser: str,
     source: str,
     id: str,
@@ -122,120 +143,178 @@ def insert_article(
     Insert an article into the database
     Returns True if inserted, False if already exists
     """
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-
+    engine = get_database_engine()
     article_id = generate_article_id(article_url)
 
     try:
-        cursor.execute(
-            """
-            INSERT OR IGNORE INTO articles 
-            (parser, source, id, subset, thread_url, title, content, date, article_id, article_url)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                parser,
-                source,
-                id,
-                subset,
-                thread_url,
-                title,
-                content,
-                date,
-                article_id,
-                article_url,
-            ),
-        )
+        with engine.connect() as conn:
+            # Use INSERT OR IGNORE for SQLite, ON CONFLICT DO NOTHING for PostgreSQL
+            if DATABASE_TYPE.lower() == "postgresql":
+                result = conn.execute(
+                    text(
+                        """
+                    INSERT INTO articles 
+                    (parser, source, id, subset, thread_url, title, content, date, article_id, article_url)
+                    VALUES (:parser, :source, :id, :subset, :thread_url, :title, :content, :date, :article_id, :article_url)
+                    ON CONFLICT (source, id) DO NOTHING
+                """
+                    ),
+                    {
+                        "parser": parser,
+                        "source": source,
+                        "id": id,
+                        "subset": subset,
+                        "thread_url": thread_url,
+                        "title": title,
+                        "content": content,
+                        "date": date,
+                        "article_id": article_id,
+                        "article_url": article_url,
+                    },
+                )
+            else:
+                result = conn.execute(
+                    text(
+                        """
+                    INSERT OR IGNORE INTO articles 
+                    (parser, source, id, subset, thread_url, title, content, date, article_id, article_url)
+                    VALUES (:parser, :source, :id, :subset, :thread_url, :title, :content, :date, :article_id, :article_url)
+                """
+                    ),
+                    {
+                        "parser": parser,
+                        "source": source,
+                        "id": id,
+                        "subset": subset,
+                        "thread_url": thread_url,
+                        "title": title,
+                        "content": content,
+                        "date": date,
+                        "article_id": article_id,
+                        "article_url": article_url,
+                    },
+                )
 
-        conn.commit()
-        inserted = cursor.rowcount > 0
+            conn.commit()
+            inserted = result.rowcount > 0
 
-    except sqlite3.Error as e:
+    except SQLAlchemyError as e:
         print(f"Database error: {e}")
         inserted = False
-    finally:
-        conn.close()
 
     return inserted
 
 
-def get_recent_articles(db_path: str, hours_back: int) -> list:
+def get_recent_articles(hours_back: int) -> list:
     """Get all unique articles from the last N hours with their sources"""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+    engine = get_database_engine()
 
-    # First query: Get basic article info grouped by article_id
-    cursor.execute(
-        """
-        SELECT article_id, article_url, title, 
-               GROUP_CONCAT(parser || ':' || source || ':' || COALESCE(thread_url, ''), ';') as sources,
-               MIN(date) as first_seen
-        FROM articles 
-        WHERE datetime(date) >= datetime('now', '-{} hours')
-        GROUP BY article_id, article_url, title
-        ORDER BY first_seen DESC
-    """.format(
-            hours_back
-        )
-    )
-
-    basic_results = cursor.fetchall()
-
-    # Second query: Get all content grouped by article_id
-    cursor.execute(
-        """
-        SELECT article_id, GROUP_CONCAT(content, ' | ') as all_content
-        FROM (
-            SELECT DISTINCT article_id, content
+    with engine.connect() as conn:
+        # First query: Get basic article info grouped by article_id
+        basic_results = conn.execute(
+            text(
+                """
+            SELECT article_id, article_url, title, 
+                   STRING_AGG(parser || ':' || source || ':' || COALESCE(thread_url, ''), ';') as sources,
+                   MIN(date) as first_seen
             FROM articles 
-            WHERE datetime(date) >= datetime('now', '-{} hours') 
-            AND content IS NOT NULL AND content != ''
-        ) 
-        GROUP BY article_id
-    """.format(
-            hours_back
-        )
-    )
+            WHERE date >= (CURRENT_TIMESTAMP - INTERVAL :hours_back HOUR)
+            GROUP BY article_id, article_url, title
+            ORDER BY first_seen DESC
+        """
+                if DATABASE_TYPE.lower() == "postgresql"
+                else """
+            SELECT article_id, article_url, title, 
+                   GROUP_CONCAT(parser || ':' || source || ':' || COALESCE(thread_url, ''), ';') as sources,
+                   MIN(date) as first_seen
+            FROM articles 
+            WHERE datetime(date) >= datetime('now', '-{} hours')
+            GROUP BY article_id, article_url, title
+            ORDER BY first_seen DESC
+        """.format(
+                    hours_back
+                )
+            ),
+            {"hours_back": hours_back} if DATABASE_TYPE.lower() == "postgresql" else {},
+        ).fetchall()
 
-    content_results = dict(cursor.fetchall())
+        # Second query: Get all content grouped by article_id
+        if DATABASE_TYPE.lower() == "postgresql":
+            content_results = conn.execute(
+                text(
+                    """
+                SELECT article_id, STRING_AGG(content, ' | ') as all_content
+                FROM (
+                    SELECT DISTINCT article_id, content
+                    FROM articles 
+                    WHERE date >= (CURRENT_TIMESTAMP - INTERVAL :hours_back HOUR)
+                    AND content IS NOT NULL AND content != ''
+                ) sub
+                GROUP BY article_id
+            """
+                ),
+                {"hours_back": hours_back},
+            ).fetchall()
+        else:
+            content_results = conn.execute(
+                text(
+                    """
+                SELECT article_id, GROUP_CONCAT(content, ' | ') as all_content
+                FROM (
+                    SELECT DISTINCT article_id, content
+                    FROM articles 
+                    WHERE datetime(date) >= datetime('now', '-{} hours') 
+                    AND content IS NOT NULL AND content != ''
+                ) 
+                GROUP BY article_id
+            """.format(
+                        hours_back
+                    )
+                )
+            ).fetchall()
 
-    # Combine results
-    results = []
-    for article_id, article_url, title, sources, first_seen in basic_results:
-        all_content = content_results.get(article_id, "")
-        results.append(
-            (article_id, article_url, title, sources, all_content, first_seen)
-        )
+        content_dict = dict(content_results)  # type: ignore
 
-    conn.close()
-    return results
+        # Combine results
+        results = []
+        for row in basic_results:
+            article_id, article_url, title, sources, first_seen = row
+            all_content = content_dict.get(article_id, "")
+            results.append(
+                (article_id, article_url, title, sources, all_content, first_seen)
+            )
+
+        return results
 
 
-def get_database_stats(db_path: str) -> dict:
+def get_database_stats() -> dict:
     """Get database statistics"""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-
+    engine = get_database_engine()
     stats = {}
 
-    # Total articles
-    cursor.execute("SELECT COUNT(*) FROM articles")
-    stats["total_articles"] = cursor.fetchone()[0]
+    with engine.connect() as conn:
+        # Total articles
+        result = conn.execute(text("SELECT COUNT(*) FROM articles")).fetchone()
+        stats["total_articles"] = result[0] if result else 0
 
-    # Unique articles
-    cursor.execute("SELECT COUNT(DISTINCT article_id) FROM articles")
-    stats["unique_articles"] = cursor.fetchone()[0]
+        # Unique articles
+        result = conn.execute(
+            text("SELECT COUNT(DISTINCT article_id) FROM articles")
+        ).fetchone()
+        stats["unique_articles"] = result[0] if result else 0
 
-    # By parser
-    cursor.execute("SELECT parser, COUNT(*) FROM articles GROUP BY parser")
-    stats["by_parser"] = dict(cursor.fetchall())
+        # By parser
+        results = conn.execute(
+            text("SELECT parser, COUNT(*) FROM articles GROUP BY parser")
+        ).fetchall()
+        stats["by_parser"] = dict(results)  # type: ignore
 
-    # By source
-    cursor.execute("SELECT source, COUNT(*) FROM articles GROUP BY source")
-    stats["by_source"] = dict(cursor.fetchall())
+        # By source
+        results = conn.execute(
+            text("SELECT source, COUNT(*) FROM articles GROUP BY source")
+        ).fetchall()
+        stats["by_source"] = dict(results)  # type: ignore
 
-    conn.close()
     return stats
 
 
@@ -245,7 +324,7 @@ if __name__ == "__main__":
 
     # Show stats if database exists and has data
     try:
-        stats = get_database_stats("ai_news.db")
+        stats = get_database_stats()
         if stats["total_articles"] > 0:
             print(f"\nDatabase Stats:")
             print(f"Total articles: {stats['total_articles']}")

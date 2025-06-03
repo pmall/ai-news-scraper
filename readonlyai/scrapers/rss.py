@@ -6,7 +6,7 @@ import feedparser
 from typing import Any
 from datetime import datetime, timedelta
 from readonlyai.utils import is_valid_webpage_url
-from readonlyai.database import DATABASE_PATH, create_database, insert_article
+from readonlyai.database import create_database, insert_article
 
 # RSS feeds - now with source names
 RSS_FEEDS = {
@@ -73,7 +73,7 @@ def run_rss_scraper(hours_back: int):
 
     try:
         # Initialize database
-        create_database(DATABASE_PATH)
+        create_database()
 
         total_new_posts = 0
 
@@ -83,7 +83,6 @@ def run_rss_scraper(hours_back: int):
 
             for post in posts:
                 inserted = insert_article(
-                    db_path=DATABASE_PATH,
                     parser="rssfeed",
                     source=source_name.lower().replace(" ", "_"),
                     id=post["id"],

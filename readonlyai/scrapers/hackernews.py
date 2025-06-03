@@ -6,7 +6,7 @@ import requests
 from typing import Any
 from datetime import datetime, timedelta
 from readonlyai.utils import is_valid_webpage_url
-from readonlyai.database import DATABASE_PATH, create_database, insert_article
+from readonlyai.database import create_database, insert_article
 
 # HackerNews AI keywords
 HN_AI_KEYWORDS = [
@@ -101,14 +101,13 @@ def run_hackernews_scraper(hours_back: int):
 
     try:
         # Initialize database
-        create_database(DATABASE_PATH)
+        create_database()
 
         hn_posts = get_hackernews_posts(hours_back)
         total_new_posts = 0
 
         for post in hn_posts:
             inserted = insert_article(
-                db_path=DATABASE_PATH,
                 parser="hackernews",
                 source="hackernews",
                 id=post["id"],
