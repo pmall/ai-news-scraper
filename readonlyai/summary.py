@@ -51,20 +51,34 @@ def generate_summary_with_sources(articles: list) -> tuple[str, dict]:
     content = "\n".join(content_lines)
 
     prompt = f"""
-    Please create a concise summary of the following AI news items.
-    
-    IMPORTANT: When mentioning specific developments, announcements, or findings, please link to the articles using markdown format with the article title as the link text and the article URL as the destination.
-    
-    Example: [Article Title](article_url)
+    Please create a concise summary of the following AI news items organized by categories.
     
     Instructions:
-    - Focus on the most important developments, trends, and announcements
-    - Organize by themes if possible (e.g., new models, research breakthroughs, industry news, etc.)
-    - Include proper source attribution by linking article titles to their URLs
-    - Keep it under 500 words
-    - Use markdown link format: [Title](URL)
+    - Organize content into these categories (only include categories that have relevant content):
+      
+      ### New Models & Releases
+      (New AI models, model updates, version releases)
+      
+      ### Research & Breakthroughs  
+      (Scientific papers, research findings, technical advances)
+      
+      ### Industry News
+      (Company announcements, funding, partnerships, business developments)
+      
+      ### Tools & Applications
+      (New AI tools, software, practical applications, but skip simple showcases)
+      
+      ### Policy & Regulation
+      (Government actions, regulations, policy discussions)
+      
+    - Write in a natural news style, summarizing the key points
+    - ALWAYS include source links when discussing specific articles - use format: [Article Title](URL)
+    - Avoid redundancy: don't mention the same name/title twice in one sentence
+    - Example: "Hugging Face released the [OpenAI Agents SDK for TypeScript](url)" NOT "Hugging Face released OpenAI Agents SDK for TypeScript [OpenAI Agents SDK for TypeScript](url)"
+    - Keep it under 600 words total
+    - Skip categories that don't have relevant content
     
-    News items:
+    News items with their URLs:
     {content}
     """
 
@@ -136,6 +150,8 @@ def run_summary_generator(hours_back: int):
         if not articles:
             print("No articles found in database!")
             return
+
+        articles = [a for a in articles if (a.relevance_score or 0) >= 50]
 
         print(f"Found {len(articles)} unique articles to summarize")
 
