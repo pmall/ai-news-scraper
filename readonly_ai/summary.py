@@ -21,7 +21,7 @@ def setup_gemini():
     return genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
-def generate_summary_with_sources(articles: list) -> tuple[str, dict]:
+def generate_summary_with_sources(articles_dict: dict) -> tuple[str, dict]:
     """Generate summary using Google Gemini with proper source attribution"""
 
     client = setup_gemini()
@@ -30,33 +30,52 @@ def generate_summary_with_sources(articles: list) -> tuple[str, dict]:
     content_lines = []
     article_mapping = {}  # title -> (url, sources_info)
 
-    for (
-        article_id,
-        article_url,
-        title,
-        sources_str,
-        all_content,
-        first_seen,
-    ) in articles:
-        # Parse sources for later use
-        sources_info = {"reddit": [], "hackernews": []}
-        for source_info in sources_str.split(";"):
-            if source_info.strip():
-                parts = source_info.split(":", 2)
-                if len(parts) >= 2:
-                    parser, source = parts[0], parts[1]
-                    thread_url = parts[2] if len(parts) > 2 and parts[2] else ""
+    for article_id, article_data in articles_dict.items():
+        article_url = article_data["article_url"]
+        sources = article_data["sources"]
 
-                    if parser == "reddit" and thread_url:
-                        sources_info["reddit"].append(thread_url)
-                    elif parser == "hackernews" and thread_url:
-                        sources_info["hackernews"].append(thread_url)
+        # Combine unique titles from all sources
+        unique_titles = []
+        seen_titles = set()
+        for source in sources:
+            if source["title"] and source["title"].strip():
+                title_clean = source["title"].strip()
+                if title_clean not in seen_titles:
+                    unique_titles.append(title_clean)
+                    seen_titles.add(title_clean)
+        title = " | ".join(unique_titles) if unique_titles else "No title"
+
+        # Combine unique content from all sources
+        unique_content = []
+        seen_content = set()
+        for source in sources:
+            if source["content"] and source["content"].strip():
+                content_clean = source["content"].strip()
+                if content_clean not in seen_content:
+                    unique_content.append(content_clean)
+                    seen_content.add(content_clean)
+        all_content = " | ".join(unique_content)
+
+        # Parse sources for later use - check all parsers and thread URLs
+        sources_info = {"reddit": [], "hackernews": [], "other": []}
+        for source in sources:
+            parser = source["parser"]
+            thread_url = source["thread_url"]
+
+            if thread_url:  # Only add if thread_url exists
+                if parser == "reddit":
+                    sources_info["reddit"].append(thread_url)
+                elif parser == "hackernews":
+                    sources_info["hackernews"].append(thread_url)
+                else:
+                    # For RSS and other sources, thread_url might be discussion links
+                    sources_info["other"].append(thread_url)
 
         # Store mapping for later reference
         article_mapping[title] = {"url": article_url, "sources": sources_info}
 
         content_lines.append(f"**{title}** - {article_url}")
-        if all_content and all_content.strip():
+        if all_content:
             content_lines.append(f"Context: {all_content[:300]}...")
         content_lines.append("")
 
@@ -143,12 +162,16 @@ def build_discussion_threads_section(referenced_articles: list) -> str:
         for hn_url in sources["hackernews"]:
             sections.append(f"  - [HackerNews Discussion]({hn_url})")
 
+        # Add other discussion threads as sub-items
+        for other_url in sources["other"]:
+            sections.append(f"  - [Discussion]({other_url})")
+
         sections.append("")  # Empty line between articles
 
     return "\n".join(sections)
 
 
-def run_summary_generator(hours_back: int):
+def run_summary_generator(hours_back: int, min_relevance_score: int):
     """Generate summary from database articles"""
     print("Running summary generator...")
 
@@ -156,17 +179,17 @@ def run_summary_generator(hours_back: int):
         # Initialize database
         create_database()
 
-        # Get recent articles
-        articles = get_recent_articles(hours_back)
+        # Get recent articles with specified min relevance score
+        articles_dict = get_recent_articles(hours_back, min_relevance_score)
 
-        if not articles:
+        if not articles_dict:
             print("No articles found in database!")
             return
 
-        print(f"Found {len(articles)} unique articles to summarize")
+        print(f"Found {len(articles_dict)} unique articles to summarize")
 
         # Generate summary
-        summary, article_mapping = generate_summary_with_sources(articles)
+        summary, article_mapping = generate_summary_with_sources(articles_dict)
 
         # Extract which articles were actually referenced
         referenced_articles = extract_referenced_articles(summary, article_mapping)

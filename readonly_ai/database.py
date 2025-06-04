@@ -5,10 +5,10 @@ Creates and manages SQLite/PostgreSQL database for storing scraped articles
 
 import os
 import hashlib
-from urllib.parse import urlparse, parse_qs, urlencode
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, Any
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
+from urllib.parse import urlparse, parse_qs, urlencode
 
 # Database configuration from environment variables
 DATABASE_TYPE = os.getenv("DATABASE_TYPE", "sqlite").lower()  # sqlite or postgresql
@@ -56,7 +56,9 @@ def create_database() -> None:
 
         # Create indexes
         conn.execute(
-            text("CREATE INDEX IF NOT EXISTS idx_article_id ON articles (article_id)")
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_article_id_unique ON articles (article_id)"
+            )
         )
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_date ON articles (date)"))
         conn.execute(
@@ -168,97 +170,80 @@ def insert_article(
         return False
 
 
-def get_recent_articles(hours_back: int) -> List[Tuple[str, str, str, str, str, str]]:
+def get_recent_articles(hours_back: int, min_relevance_score: int) -> dict[str, dict]:
     """Get all unique articles from the last N hours with their sources"""
     engine = get_database_engine()
 
-    query_params: Dict[str, Any] = {}
+    query_params: dict[str, Any] = {"min_relevance": min_relevance_score}
 
     if DATABASE_TYPE == "postgresql":
-        query_params["hours_back_interval"] = (
-            hours_back  # As integer for INTERVAL keyword
-        )
-
-        basic_query_sql = """
-            SELECT article_id, article_url, title,
-                   STRING_AGG(parser || ':' || source || ':' || COALESCE(thread_url, ''), ';') as sources,
-                   MIN(date) as first_seen
+        query_params["hours_back_interval"] = hours_back
+        sql_query = """
+            SELECT parser, source, id, subset, thread_url, title, content, date, article_id, article_url
             FROM articles
             WHERE date >= (CURRENT_TIMESTAMP - INTERVAL :hours_back_interval HOUR)
-            GROUP BY article_id, article_url, title
-            ORDER BY first_seen DESC
-        """
-        content_query_sql = """
-            SELECT article_id, STRING_AGG(content, ' | ') as all_content
-            FROM (
-                SELECT DISTINCT article_id, content
-                FROM articles
-                WHERE date >= (CURRENT_TIMESTAMP - INTERVAL :hours_back_interval HOUR)
-                AND content IS NOT NULL AND content != ''
-            ) sub
-            GROUP BY article_id
+            AND relevance_score >= :min_relevance
+            ORDER BY date DESC
         """
     else:  # sqlite
-        query_params["hours_back_delta_str"] = (
-            f"-{hours_back} hours"  # As string for datetime function
-        )
-
-        basic_query_sql = """
-            SELECT article_id, article_url, title,
-                   GROUP_CONCAT(parser || ':' || source || ':' || COALESCE(thread_url, ''), ';') as sources,
-                   MIN(date) as first_seen
+        query_params["hours_back_delta_str"] = f"-{hours_back} hours"
+        sql_query = """
+            SELECT parser, source, id, subset, thread_url, title, content, date, article_id, article_url
             FROM articles
             WHERE datetime(date) >= datetime('now', :hours_back_delta_str)
-            GROUP BY article_id, article_url, title
-            ORDER BY first_seen DESC
-        """
-        content_query_sql = """
-            SELECT article_id, GROUP_CONCAT(content, ' | ') as all_content
-            FROM (
-                SELECT DISTINCT article_id, content
-                FROM articles
-                WHERE datetime(date) >= datetime('now', :hours_back_delta_str)
-                AND content IS NOT NULL AND content != ''
-            ) sub
-            GROUP BY article_id
+            AND relevance_score >= :min_relevance
+            ORDER BY date DESC
         """
 
-    results: List[Tuple[str, str, str, str, str, str]] = []
+    result_dict: dict[str, dict] = {}
+
     try:
         with engine.connect() as conn:
-            basic_results = conn.execute(text(basic_query_sql), query_params).fetchall()
-            content_results_raw = conn.execute(
-                text(content_query_sql), query_params
-            ).fetchall()
+            rows = conn.execute(text(sql_query), query_params).fetchall()
 
-            content_dict: Dict[str, str] = {
-                row[0]: row[1] for row in content_results_raw if row[0] is not None
-            }
+            for row in rows:
+                (
+                    parser,
+                    source,
+                    id,
+                    subset,
+                    thread_url,
+                    title,
+                    content,
+                    date,
+                    article_id,
+                    article_url,
+                ) = row
 
-            for row in basic_results:
-                article_id, article_url, title, sources, first_seen = row
-                all_content = content_dict.get(article_id, "")
-                results.append(
-                    (
-                        str(article_id),
-                        str(article_url),
-                        str(title),
-                        str(sources),
-                        str(all_content),
-                        str(first_seen),
-                    )
+                if article_id not in result_dict:
+                    result_dict[article_id] = {
+                        "article_url": article_url,
+                        "sources": [],
+                    }
+
+                result_dict[article_id]["sources"].append(
+                    {
+                        "parser": parser,
+                        "source": source,
+                        "id": id,
+                        "subset": subset,
+                        "thread_url": thread_url,
+                        "title": title,
+                        "content": content,
+                        "date": date,
+                    }
                 )
+
     except SQLAlchemyError as e:
         print(f"Database error in get_recent_articles: {e}")
-        # Return empty list or re-raise, depending on desired error handling
-        return []
+        return {}
 
-    return results
+    return result_dict
 
 
 def get_unscored_articles(
     limit: Optional[int] = None,
-) -> List[Tuple[str, str, str, str]]:
+) -> list[tuple[str, str, str, str]]:
     """Get articles with null relevance scores"""
     engine = get_database_engine()
 
@@ -270,7 +255,7 @@ def get_unscored_articles(
         AND content IS NOT NULL
         ORDER BY date DESC
     """
-    query_params: Dict[str, Any] = {}
+    query_params: dict[str, Any] = {}
 
     if limit is not None:
         sql_query_final = sql_query_base + " LIMIT :limit_val"
@@ -290,7 +275,7 @@ def get_unscored_articles(
         return []
 
 
-def update_relevance_scores(scores: List[Tuple[str, str, int]]) -> int:
+def update_relevance_scores(scores: list[tuple[str, str, int]]) -> int:
     """Update relevance scores in database
     Args:
         scores: List of tuples (source, article_id_from_source, score)
@@ -326,10 +311,10 @@ def update_relevance_scores(scores: List[Tuple[str, str, int]]) -> int:
     return updated_count
 
 
-def get_database_stats() -> Dict[str, Any]:
+def get_database_stats() -> dict[str, Any]:
     """Get database statistics"""
     engine = get_database_engine()
-    stats: Dict[str, Any] = {
+    stats: dict[str, Any] = {
         "total_articles": 0,
         "unique_articles": 0,
         "by_parser": {},

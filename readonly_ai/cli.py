@@ -116,7 +116,9 @@ def main():
         required=True,
         help="Min relevance score.",
     )
-    parser_summary.set_defaults(func=lambda args: run_summary_generator(args.hb))
+    parser_summary.set_defaults(
+        func=lambda args: run_summary_generator(args.hb, args.score)
+    )
 
     args = parser.parse_args()
 
