@@ -48,6 +48,7 @@ def create_database() -> None:
                 date TEXT,
                 article_id TEXT,
                 article_url TEXT,
+                relevance_score INTEGER,
                 PRIMARY KEY (source, id)
             )
         """
@@ -68,6 +69,15 @@ def create_database() -> None:
             text(
                 """
             CREATE INDEX IF NOT EXISTS idx_date ON articles (date)
+        """
+            )
+        )
+
+        # Create index on relevance_score for filtering
+        conn.execute(
+            text(
+                """
+            CREATE INDEX IF NOT EXISTS idx_relevance_score ON articles (relevance_score)
         """
             )
         )
@@ -154,8 +164,8 @@ def insert_article(
                     text(
                         """
                     INSERT INTO articles 
-                    (parser, source, id, subset, thread_url, title, content, date, article_id, article_url)
-                    VALUES (:parser, :source, :id, :subset, :thread_url, :title, :content, :date, :article_id, :article_url)
+                    (parser, source, id, subset, thread_url, title, content, date, article_id, article_url, relevance_score)
+                    VALUES (:parser, :source, :id, :subset, :thread_url, :title, :content, :date, :article_id, :article_url, NULL)
                     ON CONFLICT (source, id) DO NOTHING
                 """
                     ),
@@ -177,8 +187,8 @@ def insert_article(
                     text(
                         """
                     INSERT OR IGNORE INTO articles 
-                    (parser, source, id, subset, thread_url, title, content, date, article_id, article_url)
-                    VALUES (:parser, :source, :id, :subset, :thread_url, :title, :content, :date, :article_id, :article_url)
+                    (parser, source, id, subset, thread_url, title, content, date, article_id, article_url, relevance_score)
+                    VALUES (:parser, :source, :id, :subset, :thread_url, :title, :content, :date, :article_id, :article_url, NULL)
                 """
                     ),
                     {
@@ -287,6 +297,59 @@ def get_recent_articles(hours_back: int) -> list:
         return results
 
 
+def get_unscored_articles(limit: Optional[int] = None) -> list:
+    """Get articles with null relevance scores"""
+    engine = get_database_engine()
+
+    with engine.connect() as conn:
+        query = """
+            SELECT source, id, title, content
+            FROM articles 
+            WHERE relevance_score IS NULL 
+            AND title IS NOT NULL 
+            AND content IS NOT NULL
+            ORDER BY date DESC
+        """
+
+        if limit:
+            if DATABASE_TYPE.lower() == "postgresql":
+                query += f" LIMIT {limit}"
+            else:
+                query += f" LIMIT {limit}"
+
+        result = conn.execute(text(query)).fetchall()
+        return [(row[0], row[1], row[2] or "", row[3] or "") for row in result]
+
+
+def update_relevance_scores(scores: list) -> int:
+    """Update relevance scores in database
+    Args:
+        scores: List of tuples (source, article_id, score)
+    Returns:
+        Number of articles updated
+    """
+    engine = get_database_engine()
+    updated_count = 0
+
+    with engine.connect() as conn:
+        for source, article_id, score in scores:
+            result = conn.execute(
+                text(
+                    """
+                    UPDATE articles 
+                    SET relevance_score = :score 
+                    WHERE source = :source AND id = :article_id
+                """
+                ),
+                {"score": score, "source": source, "article_id": article_id},
+            )
+            updated_count += result.rowcount
+
+        conn.commit()
+
+    return updated_count
+
+
 def get_database_stats() -> dict:
     """Get database statistics"""
     engine = get_database_engine()
@@ -315,6 +378,38 @@ def get_database_stats() -> dict:
         ).fetchall()
         stats["by_source"] = dict(results)  # type: ignore
 
+        # Relevance score stats
+        result = conn.execute(
+            text("SELECT COUNT(*) FROM articles WHERE relevance_score IS NULL")
+        ).fetchone()
+        stats["unscored_articles"] = result[0] if result else 0
+
+        results = conn.execute(
+            text(
+                """
+                SELECT 
+                    CASE 
+                        WHEN relevance_score >= 80 THEN 'High (80-100)'
+                        WHEN relevance_score >= 50 THEN 'Medium (50-79)'
+                        WHEN relevance_score >= 20 THEN 'Low (20-49)'
+                        WHEN relevance_score IS NOT NULL THEN 'Very Low (0-19)'
+                        ELSE 'Unscored'
+                    END as score_range,
+                    COUNT(*) as count
+                FROM articles 
+                GROUP BY 
+                    CASE 
+                        WHEN relevance_score >= 80 THEN 'High (80-100)'
+                        WHEN relevance_score >= 50 THEN 'Medium (50-79)'
+                        WHEN relevance_score >= 20 THEN 'Low (20-49)'
+                        WHEN relevance_score IS NOT NULL THEN 'Very Low (0-19)'
+                        ELSE 'Unscored'
+                    END
+            """
+            )
+        ).fetchall()
+        stats["by_relevance"] = dict(results)  # type: ignore
+
     return stats
 
 
@@ -329,7 +424,9 @@ if __name__ == "__main__":
             print(f"\nDatabase Stats:")
             print(f"Total articles: {stats['total_articles']}")
             print(f"Unique articles: {stats['unique_articles']}")
+            print(f"Unscored articles: {stats['unscored_articles']}")
             print(f"By parser: {stats['by_parser']}")
             print(f"By source: {stats['by_source']}")
+            print(f"By relevance: {stats['by_relevance']}")
     except:
         pass
