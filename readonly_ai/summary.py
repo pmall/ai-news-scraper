@@ -120,20 +120,37 @@ def generate_summary_with_sources(articles_dict: dict) -> tuple[str, dict]:
     return response.text or "", article_mapping
 
 
-def extract_referenced_articles(summary_text: str, article_mapping: dict) -> list:
-    """Extract article titles that were actually referenced in the summary"""
+def extract_referenced_articles(summary_text: str, articles_dict: dict) -> list:
+    """Extract article URLs that were actually referenced in the summary"""
     referenced_articles = []
 
-    # Find all markdown links in the summary
-    markdown_links = re.findall(r"\[([^\]]+)\]\([^)]+\)", summary_text)
+    # Find all markdown links in the summary and extract URLs
+    markdown_links = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", summary_text)
 
-    for link_text in markdown_links:
-        # Check if this link text matches any of our article titles
-        for title, info in article_mapping.items():
-            if link_text.strip() == title.strip():
-                referenced_articles.append(
-                    {"title": title, "url": info["url"], "sources": info["sources"]}
-                )
+    for link_text, url in markdown_links:
+        # Look for this URL in our articles_dict
+        for article_id, article_data in articles_dict.items():
+            if article_data["article_url"] == url:
+                sources = article_data["sources"]
+
+                # Parse sources and organize by type - only Reddit and HackerNews
+                sources_info = {"reddit": [], "hackernews": []}
+
+                for source in sources:
+                    parser = source["parser"]
+                    thread_url = source["thread_url"]
+
+                    if thread_url:  # Only add if thread_url exists
+                        if parser == "reddit":
+                            sources_info["reddit"].append(thread_url)
+                        elif parser == "hackernews":
+                            sources_info["hackernews"].append(thread_url)
+
+                # Only add articles that have Reddit or HackerNews threads
+                if sources_info["reddit"] or sources_info["hackernews"]:
+                    referenced_articles.append(
+                        {"title": link_text, "url": url, "sources": sources_info}
+                    )
                 break
 
     return referenced_articles
@@ -154,19 +171,15 @@ def build_discussion_threads_section(referenced_articles: list) -> str:
         # Add main article link
         sections.append(f"- [{title}]({url})")
 
-        # Add Reddit threads as sub-items
+        # Add Reddit threads first
         for reddit_url in sources["reddit"]:
             sections.append(f"  - [Reddit Discussion]({reddit_url})")
 
-        # Add HackerNews threads as sub-items
+        # Add HackerNews threads second
         for hn_url in sources["hackernews"]:
             sections.append(f"  - [HackerNews Discussion]({hn_url})")
 
-        # Add other discussion threads as sub-items
-        for other_url in sources["other"]:
-            sections.append(f"  - [Discussion]({other_url})")
-
-        sections.append("")  # Empty line between articles
+        sections.append("")
 
     return "\n".join(sections)
 
@@ -192,7 +205,7 @@ def run_summary_generator(hours_back: int, min_relevance_score: int):
         summary, article_mapping = generate_summary_with_sources(articles_dict)
 
         # Extract which articles were actually referenced
-        referenced_articles = extract_referenced_articles(summary, article_mapping)
+        referenced_articles = extract_referenced_articles(summary, articles_dict)
 
         # Build discussion threads section
         discussion_section = build_discussion_threads_section(referenced_articles)
