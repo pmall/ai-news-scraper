@@ -44,10 +44,11 @@ def get_reddit_posts(
         if post_time < cutoff_time:
             break
 
-        # Only include posts with valid external URLs
+        # Only include posts with valid external URLs (exclude all Reddit domains)
         if (
             post.url
-            and not post.url.startswith("https://www.reddit.com")
+            and "reddit.com" not in post.url
+            and "redd.it" not in post.url
             and is_valid_webpage_url(post.url)
         ):
             reddit_thread_url = f"https://www.reddit.com{post.permalink}"

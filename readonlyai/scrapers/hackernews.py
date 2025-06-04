@@ -32,6 +32,9 @@ HN_AI_KEYWORDS = [
     "natural language processing",
 ]
 
+# Tags to exclude from HackerNews results
+HN_EXCLUDED_TAGS = ["show_hn", "ask_hn", "comment", "poll", "pollopt"]
+
 
 def get_hackernews_posts(hours_back: int) -> list[dict[str, Any]]:
     """Get recent AI-related posts from HackerNews using Algolia search API"""
@@ -59,11 +62,16 @@ def get_hackernews_posts(hours_back: int) -> list[dict[str, Any]]:
             for hit in data.get("hits", []):
                 hit_id = hit.get("objectID")
                 external_url = hit.get("url", "")
+                hit_tags = hit.get("_tags", [])
 
                 # Skip duplicates by HN ID
                 if hit_id in seen_ids:
                     continue
                 seen_ids.add(hit_id)
+
+                # Skip if contains excluded tags
+                if any(excluded_tag in hit_tags for excluded_tag in HN_EXCLUDED_TAGS):
+                    continue
 
                 # Skip if no external URL or if it's not a valid webpage
                 if not external_url or not is_valid_webpage_url(external_url):
