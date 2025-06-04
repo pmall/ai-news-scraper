@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Database setup for AI News Parser
 Creates and manages SQLite/PostgreSQL database for storing scraped articles

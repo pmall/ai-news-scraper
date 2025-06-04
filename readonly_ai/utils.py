@@ -1,11 +1,3 @@
-# =============================================================================
-# UTILITY FUNCTIONS
-# =============================================================================
-
-from typing import Optional
-from pathlib import Path
-from datetime import datetime
-
 # File extensions to exclude (not webpages)
 EXCLUDED_EXTENSIONS = {
     ".jpg",

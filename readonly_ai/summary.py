@@ -1,18 +1,30 @@
-# =============================================================================
-# SUMMARY GENERATION
-# =============================================================================
+"""
+AI Article Summarizer
+summarize articles on artificial intelligence based on their relevance score using Gemini
+"""
 
 import os
 import re
 from google import genai
 from pathlib import Path
 from datetime import datetime
-from readonlyai.database import create_database, get_recent_articles
+from readonly_ai.database import create_database, get_recent_articles
+
+
+# Setup gemini client
+def setup_gemini():
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY environment variable is required")
+
+    return genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 def generate_summary_with_sources(articles: list) -> tuple[str, dict]:
     """Generate summary using Google Gemini with proper source attribution"""
-    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+    client = setup_gemini()
 
     # Prepare content for the prompt and build article mapping
     content_lines = []
@@ -150,8 +162,6 @@ def run_summary_generator(hours_back: int):
         if not articles:
             print("No articles found in database!")
             return
-
-        articles = [a for a in articles if (a.relevance_score or 0) >= 50]
 
         print(f"Found {len(articles)} unique articles to summarize")
 

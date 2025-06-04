@@ -1,13 +1,9 @@
-# =============================================================================
-# RSS FEED SCRAPER
-# =============================================================================
-
 import feedparser
 import dateutil.parser
 from typing import Any, Optional
 from datetime import datetime, timedelta
-from readonlyai.utils import is_valid_webpage_url
-from readonlyai.database import create_database, insert_article
+from readonly_ai.utils import is_valid_webpage_url
+from readonly_ai.database import create_database, insert_article
 
 # RSS feeds - now with source names
 RSS_FEEDS = {

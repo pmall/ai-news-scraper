@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-AI News Parser - Daily AI news aggregator
-Collects AI news from Reddit, HackerNews, YouTube, and RSS feeds
-Now stores data in SQLite database instead of markdown files
+Readonly AI - Daily AI news aggregator
+Collects AI news from Reddit, HackerNews, and RSS feeds
 """
 
 import argparse
 from dotenv import load_dotenv
-from readonlyai.score import run_relevance_scoring
-from readonlyai.summary import run_summary_generator
-from readonlyai.scrapers import (
+from readonly_ai.score import run_relevance_scoring
+from readonly_ai.summary import run_summary_generator
+from readonly_ai.scrapers import (
     run_reddit_scraper,
     run_hackernews_scraper,
     run_rss_scraper,

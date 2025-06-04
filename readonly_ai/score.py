@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 AI Relevance Scorer
 Scores articles based on their relevance to artificial intelligence using Gemini Flash
@@ -7,24 +6,23 @@ Scores articles based on their relevance to artificial intelligence using Gemini
 import os
 import json
 import time
-from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from database import get_unscored_articles, update_relevance_scores
 
-# Load environment variables
-load_dotenv()
-
-# Configure Gemini
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable is required")
-
-client = genai.Client(api_key=GEMINI_API_KEY)
-
 # Batch size for processing articles
 BATCH_SIZE = 20
 MAX_CONSECUTIVE_FAILURES = 3
+
+
+# Setup gemini client
+def setup_gemini():
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY environment variable is required")
+
+    return genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 def create_scoring_prompt(articles: list[tuple[str, str, str, str]]) -> str:
@@ -57,6 +55,8 @@ Return ONLY a JSON array with scores in the same order as the articles below:
 
 def score_articles_batch(articles: list[tuple[str, str, str, str]]) -> list[int]:
     """Score a batch of articles using Gemini"""
+    client = setup_gemini()
+
     try:
         prompt = create_scoring_prompt(articles)
 

@@ -1,13 +1,9 @@
-# =============================================================================
-# REDDIT SCRAPER
-# =============================================================================
-
 import os
 import praw
 from typing import Any
 from datetime import datetime, timedelta
-from readonlyai.utils import is_valid_webpage_url
-from readonlyai.database import create_database, insert_article
+from readonly_ai.utils import is_valid_webpage_url
+from readonly_ai.database import create_database, insert_article
 
 # Reddit configuration
 REDDIT_SUBREDDITS = [
@@ -24,10 +20,19 @@ REDDIT_SUBREDDITS = [
 
 def setup_reddit():
     """Setup Reddit API connection"""
+    REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
+    REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
+
+    if not REDDIT_CLIENT_ID:
+        raise ValueError("REDDIT_CLIENT_ID environment variable is required")
+
+    if not REDDIT_CLIENT_SECRET:
+        raise ValueError("REDDIT_CLIENT_SECRET environment variable is required")
+
     return praw.Reddit(
-        client_id=os.getenv("REDDIT_CLIENT_ID"),
-        client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-        user_agent="ai_news_parser/2.0",
+        client_id=REDDIT_CLIENT_ID,
+        client_secret=REDDIT_CLIENT_SECRET,
+        user_agent="readonly-ai/1.0",
     )
 
 
