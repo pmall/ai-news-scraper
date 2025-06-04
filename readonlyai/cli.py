@@ -7,7 +7,7 @@ Now stores data in SQLite database instead of markdown files
 
 import argparse
 from dotenv import load_dotenv
-from readonlyai.database import DATABASE_PATH
+from readonlyai.score import run_relevance_scoring
 from readonlyai.summary import run_summary_generator
 from readonlyai.scrapers import (
     run_reddit_scraper,
@@ -39,41 +39,96 @@ def run_all(hours_back: int):
 
 
 def main():
-    """Main function with command line argument parsing"""
+    """Main function with command line argument parsing using subparsers."""
     parser = argparse.ArgumentParser(description="AI News Scraper")
-    parser.add_argument("--reddit", action="store_true", help="Run Reddit scraper only")
-    parser.add_argument(
-        "--hackernews", action="store_true", help="Run HackerNews scraper only"
+    subparsers = parser.add_subparsers(
+        dest="command", help="Available commands", required=True
     )
-    parser.add_argument("--rss", action="store_true", help="Run RSS scraper only")
-    parser.add_argument("--summary", action="store_true", help="Run summary generator")
-    parser.add_argument(
-        "--all", action="store_true", help="Run all scrapers and generate summary"
-    )
-    parser.add_argument(
+
+    # --- Scraper commands ---
+    # Parent parser for common arguments like --hb
+    scraper_parser_parent = argparse.ArgumentParser(add_help=False)
+    scraper_parser_parent.add_argument(
         "--hb",
-        help="Scrape/summarize articles of the hb hours back",
         type=int,
         required=True,
+        help="Scrape articles from the last 'hb' hours.",
     )
+
+    # Reddit command
+    parser_reddit = subparsers.add_parser(
+        "reddit",
+        parents=[scraper_parser_parent],
+        help="Run Reddit scraper only.",
+        description="Scrapes news from Reddit for a specified number of hours back.",
+    )
+    parser_reddit.set_defaults(func=lambda args: run_reddit_scraper(args.hb))
+
+    # HackerNews command
+    parser_hackernews = subparsers.add_parser(
+        "hackernews",
+        parents=[scraper_parser_parent],
+        help="Run HackerNews scraper only.",
+        description="Scrapes news from HackerNews for a specified number of hours back.",
+    )
+    parser_hackernews.set_defaults(func=lambda args: run_hackernews_scraper(args.hb))
+
+    # RSS command
+    parser_rss = subparsers.add_parser(
+        "rss",
+        parents=[scraper_parser_parent],
+        help="Run RSS scraper only.",
+        description="Scrapes news from RSS feeds for a specified number of hours back.",
+    )
+    parser_rss.set_defaults(func=lambda args: run_rss_scraper(args.hb))
+
+    # All command
+    parser_all = subparsers.add_parser(
+        "all",
+        parents=[scraper_parser_parent],
+        help="Run all scrapers.",
+        description="Runs all available scrapers (Reddit, HackerNews, RSS) for a specified number of hours back.",
+    )
+    parser_all.set_defaults(func=lambda args: run_all(args.hb))
+
+    # --- Scoring command ---
+    parser_score = subparsers.add_parser(
+        "score",
+        help="Run relevance scoring.",
+        description="Performs relevance scoring on the scraped news articles. The output of this might be used by the 'summary' command.",
+    )
+    parser_score.set_defaults(func=lambda args: run_relevance_scoring())
+
+    # --- Summary command ---
+    parser_summary = subparsers.add_parser(
+        "summary",
+        help="Generate summary.",
+        description="Generates a summary of news articles based on specified hours back and a scoring input.",
+    )
+    parser_summary.add_argument(
+        "--hb",
+        type=int,
+        required=True,
+        help="Summarize articles from the last 'hb' hours.",
+    )
+    parser_summary.add_argument(
+        "--score",
+        type=int,
+        required=True,
+        help="Min relevance score.",
+    )
+    parser_summary.set_defaults(func=lambda args: run_summary_generator(args.hb))
 
     args = parser.parse_args()
 
-    if args.reddit:
-        run_reddit_scraper(args.hb)
-    elif args.hackernews:
-        run_hackernews_scraper(args.hb)
-    elif args.rss:
-        run_rss_scraper(args.hb)
-    elif args.all:
-        run_all(args.hb)
-    elif args.summary:
-        run_summary_generator(args.hb)
+    # Call the function associated with the chosen command
+    if hasattr(args, "func"):
+        args.func(args)
     else:
-        print(
-            "Please specify an action: --reddit, --hackernews, --rss, --summary, or --all"
-        )
-        print(f"Database: {DATABASE_PATH}")
+        # This case should ideally not be reached if subparsers are required
+        # and each subparser has a default function.
+        # However, it's good practice for older Python versions or complex setups.
+        parser.print_help()
 
 
 if __name__ == "__main__":
