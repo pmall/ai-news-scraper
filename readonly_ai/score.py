@@ -8,7 +8,7 @@ import json
 import time
 from google import genai
 from google.genai import types
-from database import get_unscored_articles, update_relevance_scores
+from readonly_ai.database import get_unscored_articles, update_relevance_scores
 
 # Batch size for processing articles
 BATCH_SIZE = 20
