@@ -8,7 +8,9 @@ import re
 from google import genai
 from pathlib import Path
 from datetime import datetime
+from readonly_ai.prompts import SUMMARY_PROMPT_TEMPLATE
 from readonly_ai.database import create_database, get_recent_articles
+from string import Template
 
 
 # Setup gemini client
@@ -23,6 +25,7 @@ def setup_gemini():
 
 def generate_summary_with_sources(articles_dict: dict) -> tuple[str, dict]:
     """Generate summary using Google Gemini with proper source attribution"""
+    s = Template(SUMMARY_PROMPT_TEMPLATE)
 
     client = setup_gemini()
 
@@ -77,57 +80,12 @@ def generate_summary_with_sources(articles_dict: dict) -> tuple[str, dict]:
         content_lines.append(f"**{title}** - {article_url}")
         if all_content:
             content_lines.append(f"Context: {all_content[:300]}...")
-        content_lines.append("")
 
-    content = "\n".join(content_lines)
+    content = "\n\n".join(content_lines)
 
-    prompt = f"""
-    Please create a concise summary of the following AI news items organized by categories.
+    prompt = s.substitute(content=content)
 
-    Instructions:
-    - Organize content into these categories using bullet points (only include categories that have relevant content):
-    
-    ### New Models & Releases
-    (New AI models, model updates, version releases)
-    
-    ### Research & Breakthroughs  
-    (Scientific papers, research findings, technical advances)
-    
-    ### Industry News
-    (Company announcements, funding, partnerships, business developments)
-    
-    ### Tools & Applications
-    (New AI tools, software, practical applications, but skip simple showcases)
-    
-    ### Policy & Regulation
-    (Government actions, regulations, policy discussions)
-    
-    - Write each item as a bullet point with natural news style
-    - CRITICAL: Integrate links naturally into the sentence flow. The link text should BE PART OF the sentence, not added at the end
-
-    Examples of GOOD bullet point integration:
-    - OpenAI released [GPT-4 Turbo](url) with enhanced context window and reduced pricing
-    - Researchers at Stanford published [Constitutional AI paper](url) showing improved safety alignment  
-    - Anthropic's [Claude 3.5 Sonnet](url) demonstrates significant improvements in coding tasks
-    - Google DeepMind's [Gemini Ultra](url) achieves state-of-the-art performance on mathematical reasoning
-    - Meta announced [Llama 3.2](url) with improved reasoning capabilities for mobile devices
-
-    Examples of BAD formatting (avoid these):
-    - OpenAI released GPT-4 Turbo with enhanced features. [GPT-4 Turbo](url)
-    - New research on constitutional AI shows promising results. [Constitutional AI paper](url)
-
-    - Each bullet point should be a single flowing sentence with embedded links
-    - Never repeat the same name/title twice in one sentence  
-    - Keep it under 600 words total
-    - Skip categories that don't have relevant content
-
-    News items with their URLs:
-    {content}
-    """
-
-    response = client.models.generate_content(
-        model="gemini-2.0-flash-001", contents=prompt
-    )
+    response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
 
     return response.text or "", article_mapping
 

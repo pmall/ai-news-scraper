@@ -8,7 +8,9 @@ import json
 import time
 from google import genai
 from google.genai import types
+from readonly_ai.prompts import SCORING_PROMPT_TEMPLATE
 from readonly_ai.database import get_unscored_articles, update_relevance_scores
+from string import Template
 
 # Batch size for processing articles
 BATCH_SIZE = 20
@@ -27,28 +29,19 @@ def setup_gemini():
 
 def create_scoring_prompt(articles: list[tuple[str, str, str, str]]) -> str:
     """Create prompt for Gemini to score articles"""
-    prompt = """You are an AI expert tasked with scoring articles based on their relevance to artificial intelligence.
+    s = Template(SCORING_PROMPT_TEMPLATE)
 
-Score each article from 0-100 based on how relevant it is to artificial intelligence, machine learning, LLMs, neural networks, AI research, AI applications, or AI industry developments.
-
-Scoring guidelines:
-- 90-100: Core AI/ML content (new models, AI research breakthroughs, AI company developments)
-- 70-89: AI applications, AI tools, AI industry news
-- 50-69: Technology with significant AI components
-- 30-49: Technology that mentions AI but isn't primarily about it
-- 10-29: Brief AI mentions in broader context
-- 0-9: No meaningful AI relevance
-
-Return ONLY a JSON array with scores in the same order as the articles below:
-
-"""
+    lines = []
 
     for i, (source, article_id, title, content) in enumerate(articles):
         # Truncate content to avoid token limits
+        truncated_title = content[:500] + "..." if len(title) > 500 else title
         truncated_content = content[:1000] + "..." if len(content) > 1000 else content
-        prompt += f"\nArticle {i+1}:\nTitle: {title}\nContent: {truncated_content}\n"
+        lines.append(
+            f"Article {i+1}:\nTitle: {truncated_title}\nContent: {truncated_content}"
+        )
 
-    prompt += f"\nRespond with exactly {len(articles)} scores as a JSON array: [score1, score2, ...]"
+    prompt = s.substitute(articles="\n\n".join(lines), n=len(lines))
 
     return prompt
 
@@ -61,7 +54,7 @@ def score_articles_batch(articles: list[tuple[str, str, str, str]]) -> list[int]
         prompt = create_scoring_prompt(articles)
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash-001",
+            model="gemini-2.0-flash-lite",
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.1,
