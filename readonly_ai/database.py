@@ -5,6 +5,7 @@ Creates and manages SQLite/PostgreSQL database for storing scraped articles
 
 import os
 import hashlib
+from bs4 import BeautifulSoup
 from typing import Optional, Any
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -14,6 +15,32 @@ from urllib.parse import urlparse, parse_qs, urlencode
 DATABASE_TYPE = os.getenv("DATABASE_TYPE", "sqlite").lower()  # sqlite or postgresql
 DATABASE_PATH = os.getenv("DATABASE_PATH", "ai_news.db")  # for sqlite only
 DATABASE_URL = os.getenv("DATABASE_URL")  # for postgresql only
+
+
+def clean_text(text: str) -> str:
+    """
+    Clean HTML and normalize text encoding
+
+    Args:
+        text: Raw text that may contain HTML
+
+    Returns:
+        Clean UTF-8 text
+    """
+    if not isinstance(text, str):
+        return ""
+
+    # Use BeautifulSoup to clean HTML
+    soup = BeautifulSoup(text, "html.parser")
+    cleaned = soup.get_text()
+
+    # Normalize whitespace
+    cleaned = " ".join(cleaned.split())
+
+    # Ensure proper UTF-8 encoding
+    cleaned = cleaned.encode("utf-8", errors="ignore").decode("utf-8")
+
+    return cleaned.strip()
 
 
 def get_database_engine():
@@ -122,12 +149,16 @@ def insert_article(
     article_url: str,
 ) -> bool:
     """
-    Insert an article into the database.
+    Insert an article into the database with cleaned title and content.
     Returns True if inserted, False if already exists or error.
     """
     engine = get_database_engine()
     # This is the unique ID generated from the article_url itself
     generated_id_for_article = generate_article_id(article_url)
+
+    # Clean the title and content before inserting
+    cleaned_title = clean_text(title)
+    cleaned_content = clean_text(content)
 
     params = {
         "parser": parser,
@@ -135,8 +166,8 @@ def insert_article(
         "id": id,
         "subset": subset,
         "thread_url": thread_url,
-        "title": title,
-        "content": content,
+        "title": cleaned_title,
+        "content": cleaned_content,
         "date": date,
         "article_id_col": generated_id_for_article,  # Param name for clarity
         "article_url": article_url,
