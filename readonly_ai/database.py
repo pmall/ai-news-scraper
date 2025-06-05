@@ -5,11 +5,11 @@ Creates and manages SQLite/PostgreSQL database for storing scraped articles
 
 import os
 import hashlib
-from bs4 import BeautifulSoup
 from typing import Optional, Any
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from urllib.parse import urlparse, parse_qs, urlencode
+from bs4 import BeautifulSoup
 
 # Database configuration from environment variables
 DATABASE_TYPE = os.getenv("DATABASE_TYPE", "sqlite").lower()  # sqlite or postgresql
@@ -17,7 +17,7 @@ DATABASE_PATH = os.getenv("DATABASE_PATH", "ai_news.db")  # for sqlite only
 DATABASE_URL = os.getenv("DATABASE_URL")  # for postgresql only
 
 
-def clean_text(text: str) -> str:
+def clean_text(text: Optional[str]) -> Optional[str]:
     """
     Clean HTML and normalize text encoding
 
@@ -27,8 +27,8 @@ def clean_text(text: str) -> str:
     Returns:
         Clean UTF-8 text
     """
-    if not isinstance(text, str):
-        return ""
+    if not text or not isinstance(text, str):
+        return None
 
     # Use BeautifulSoup to clean HTML
     soup = BeautifulSoup(text, "html.parser")
@@ -59,7 +59,7 @@ def create_database() -> None:
     engine = get_database_engine()
 
     with engine.connect() as conn:
-        # Create the articles table
+        # Create the articles table - all essential fields are NOT NULL
         conn.execute(
             text(
                 """
@@ -69,11 +69,11 @@ def create_database() -> None:
                 id TEXT NOT NULL,
                 subset TEXT,
                 thread_url TEXT,
-                title TEXT,
+                title TEXT NOT NULL,
                 content TEXT,
-                date TEXT,
-                article_id TEXT,
-                article_url TEXT,
+                date TEXT NOT NULL,
+                article_id TEXT NOT NULL,
+                article_url TEXT NOT NULL,
                 relevance_score INTEGER,
                 PRIMARY KEY (source, id)
             )
@@ -140,37 +140,65 @@ def generate_article_id(url: str) -> str:
 def insert_article(
     parser: str,
     source: str,
-    id: str,  # This is the ID from the source platform (e.g., reddit post ID)
+    id: str,
     subset: Optional[str],
     thread_url: Optional[str],
     title: str,
-    content: str,
+    content: Optional[str],
     date: str,
     article_url: str,
 ) -> bool:
     """
     Insert an article into the database with cleaned title and content.
-    Returns True if inserted, False if already exists or error.
+    Returns True if inserted, False if validation fails or already exists.
     """
-    engine = get_database_engine()
-    # This is the unique ID generated from the article_url itself
-    generated_id_for_article = generate_article_id(article_url)
-
-    # Clean the title and content before inserting
-    cleaned_title = clean_text(title)
-    cleaned_content = clean_text(content)
-
-    params = {
+    # Validate all required fields
+    required_fields = {
         "parser": parser,
         "source": source,
         "id": id,
-        "subset": subset,
-        "thread_url": thread_url,
+        "title": title,
+        "date": date,
+        "article_url": article_url,
+    }
+
+    missing_fields = [
+        field
+        for field, value in required_fields.items()
+        if not value or not str(value).strip()
+    ]
+    if missing_fields:
+        print(f"Missing required fields: {missing_fields}")
+        return False
+
+    # Generate article_id from URL
+    generated_article_id = generate_article_id(article_url)
+    if not generated_article_id:
+        print(f"Could not generate article_id from URL: {article_url}")
+        return False
+
+    # Clean the title and content
+    cleaned_title = clean_text(title)
+    cleaned_content = clean_text(content)
+
+    # Validate after cleaning
+    if not cleaned_title:
+        print(f"Title is empty after cleaning")
+        return False
+
+    engine = get_database_engine()
+
+    params = {
+        "parser": parser.strip(),
+        "source": source.strip(),
+        "id": id.strip(),
+        "subset": subset.strip() if subset else None,
+        "thread_url": thread_url.strip() if thread_url else None,
         "title": cleaned_title,
         "content": cleaned_content,
-        "date": date,
-        "article_id_col": generated_id_for_article,  # Param name for clarity
-        "article_url": article_url,
+        "date": date.strip(),
+        "article_id": generated_article_id,
+        "article_url": article_url.strip(),
     }
 
     if DATABASE_TYPE == "postgresql":
@@ -178,7 +206,7 @@ def insert_article(
             """
             INSERT INTO articles
             (parser, source, id, subset, thread_url, title, content, date, article_id, article_url, relevance_score)
-            VALUES (:parser, :source, :id, :subset, :thread_url, :title, :content, :date, :article_id_col, :article_url, NULL)
+            VALUES (:parser, :source, :id, :subset, :thread_url, :title, :content, :date, :article_id, :article_url, NULL)
             ON CONFLICT (source, id) DO NOTHING
         """
         )
@@ -187,7 +215,7 @@ def insert_article(
             """
             INSERT OR IGNORE INTO articles
             (parser, source, id, subset, thread_url, title, content, date, article_id, article_url, relevance_score)
-            VALUES (:parser, :source, :id, :subset, :thread_url, :title, :content, :date, :article_id_col, :article_url, NULL)
+            VALUES (:parser, :source, :id, :subset, :thread_url, :title, :content, :date, :article_id, :article_url, NULL)
         """
         )
 
@@ -282,8 +310,6 @@ def get_unscored_articles(
         SELECT source, id, title, content
         FROM articles
         WHERE relevance_score IS NULL
-        AND title IS NOT NULL
-        AND content IS NOT NULL
         ORDER BY date DESC
     """
     query_params: dict[str, Any] = {}
@@ -298,8 +324,7 @@ def get_unscored_articles(
         with engine.connect() as conn:
             result = conn.execute(text(sql_query_final), query_params).fetchall()
             return [
-                (str(row[0]), str(row[1]), str(row[2] or ""), str(row[3] or ""))
-                for row in result
+                (str(row[0]), str(row[1]), str(row[2]), str(row[3])) for row in result
             ]
     except SQLAlchemyError as e:
         print(f"Database error in get_unscored_articles: {e}")
@@ -337,7 +362,6 @@ def update_relevance_scores(scores: list[tuple[str, str, int]]) -> int:
             conn.commit()
     except SQLAlchemyError as e:
         print(f"Database error in update_relevance_scores: {e}")
-        # Optionally re-raise or handle transaction rollback if necessary
 
     return updated_count
 
@@ -401,7 +425,6 @@ def get_database_stats() -> dict[str, Any]:
 
     except SQLAlchemyError as e:
         print(f"Database error in get_database_stats: {e}")
-        # Stats will return partially filled or default if error occurs early
 
     return stats
 
@@ -414,7 +437,7 @@ if __name__ == "__main__":
             print("\nDatabase Stats:")
             for key, value in db_stats.items():
                 print(f"{key.replace('_', ' ').capitalize()}: {value}")
-    except SQLAlchemyError as e:  # More specific exception
+    except SQLAlchemyError as e:
         print(f"Could not retrieve database stats: {e}")
-    except Exception as e:  # General fallback
+    except Exception as e:
         print(f"An unexpected error occurred when trying to show stats: {e}")
