@@ -1,3 +1,7 @@
+"""
+Prompt templates for AI analysis and summarization
+"""
+
 SCORING_PROMPT_TEMPLATE = """
 You are an **AI expert** tasked with **analyzing articles** for relevance to artificial intelligence, **categorizing them**, and **extracting relevant tags**.
 
@@ -39,7 +43,7 @@ For each article, provide:
 
 Return **ONLY a JSON array** with objects containing `score`, `category`, and `tags` for each article **in the same order**:
 
-`$articles`
+$articles
 
 Respond with **exactly $n objects** as a JSON array:
 ```json
@@ -51,7 +55,8 @@ Respond with **exactly $n objects** as a JSON array:
 ```
 """.strip()
 
-SUMMARY_PROMPT_TEMPLATE = f"""
+
+SUMMARY_PROMPT_TEMPLATE = """
 You are an expert AI news editor. Your task is to generate a **concise and structured list** of AI news headlines based on the input data below.
 
 **Instructions:**
@@ -70,7 +75,7 @@ You are an expert AI news editor. Your task is to generate a **concise and struc
 [
   "OpenAI introduced [GPT-4 Turbo](url), offering faster performance and lower cost for developers",
   "Stanford researchers released the [Constitutional AI paper](url) advancing alignment techniques",
-  "Anthropic’s [Claude 3.5 Sonnet](url) shows improved code generation and reasoning"
+  "Anthropic's [Claude 3.5 Sonnet](url) shows improved code generation and reasoning"
 ]
 ```
 
@@ -86,6 +91,7 @@ Now summarize the following news items:
 
 $content
 """.strip()
+
 
 SUMMARY_PROMPT_TEMPLATE_EN = f"""
 OUTPUT IN ENGLISH LANGUAGE

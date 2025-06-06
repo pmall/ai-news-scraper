@@ -1,8 +1,16 @@
+"""
+RSS feed scraper for AI-related articles
+"""
+
 import feedparser
 import dateutil.parser
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
-from datetime import datetime, timedelta
-from readonly_ai.utils import is_valid_webpage_url
+from readonly_ai.utils import (
+    is_valid_webpage_url,
+    generate_article_id,
+    format_utc_datetime,
+)
 from readonly_ai.database import create_database, insert_article
 
 
@@ -14,9 +22,13 @@ def parse_date_fallback(date_string: Optional[str]) -> Optional[datetime]:
     try:
         # Use dateutil.parser which handles most RSS date formats
         parsed_date = dateutil.parser.parse(date_string)
-        # Convert to naive datetime (remove timezone info for comparison)
-        return parsed_date.replace(tzinfo=None)
-    except:
+        # Convert to UTC timezone
+        if parsed_date.tzinfo is None:
+            parsed_date = parsed_date.replace(tzinfo=timezone.utc)
+        else:
+            parsed_date = parsed_date.astimezone(timezone.utc)
+        return parsed_date
+    except Exception:
         return None
 
 
@@ -26,7 +38,7 @@ def get_rss_posts(
     """Get recent posts from an RSS feed"""
     feed = feedparser.parse(rss_url)
     posts = []
-    cutoff_time = datetime.now() - timedelta(hours=hours_back)
+    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours_back)
 
     for entry in feed.entries:
         published_time = None
@@ -36,9 +48,9 @@ def get_rss_posts(
             if hasattr(entry, time_field) and getattr(entry, time_field):
                 try:
                     time_struct = getattr(entry, time_field)
-                    published_time = datetime(*time_struct[:6])
+                    published_time = datetime(*time_struct[:6], tzinfo=timezone.utc)
                     break
-                except:
+                except Exception:
                     continue
 
         # Only if feedparser couldn't parse it, try manual parsing
@@ -53,10 +65,7 @@ def get_rss_posts(
         if published_time and published_time >= cutoff_time:
             article_url = entry.link
             if is_valid_webpage_url(str(article_url)):
-                # Generate a simple ID from the URL
-                import hashlib
-
-                article_id = hashlib.md5(str(article_url).encode()).hexdigest()[:16]
+                article_id = generate_article_id(str(article_url))
 
                 posts.append(
                     {
@@ -64,7 +73,7 @@ def get_rss_posts(
                         "title": entry.title,
                         "url": article_url,
                         "content": (entry.summary if hasattr(entry, "summary") else ""),
-                        "created": published_time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "created": format_utc_datetime(published_time),
                         "source": source_name,
                     }
                 )
@@ -72,18 +81,16 @@ def get_rss_posts(
     return posts
 
 
-def run_rss_scraper(hours_back: int, rssfeeds: dict[str, str]):
+def run_rss_scraper(hours_back: int, rssfeeds: dict[str, str]) -> None:
     """Run RSS scraper and save to database"""
-    print("Running RSS scraper...")
+    print("[INFO] Running RSS scraper...")
 
     try:
-        # Initialize database
         create_database()
-
         total_new_posts = 0
 
         for source_name, rss_url in rssfeeds.items():
-            print(f"  - {source_name}")
+            print(f"[INFO] Processing {source_name}")
             posts = get_rss_posts(source_name, rss_url, hours_back)
 
             for post in posts:
@@ -101,8 +108,10 @@ def run_rss_scraper(hours_back: int, rssfeeds: dict[str, str]):
                 if inserted:
                     total_new_posts += 1
 
-        print(f"RSS scraper completed. Added {total_new_posts} new posts to database.")
+        print(
+            f"[INFO] RSS scraper completed. Added {total_new_posts} new posts to database."
+        )
 
     except Exception as e:
-        print(f"RSS scraper failed: {e}")
+        print(f"[ERROR] RSS scraper failed: {e}")
         raise

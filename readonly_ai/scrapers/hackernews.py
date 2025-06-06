@@ -1,8 +1,13 @@
+"""
+HackerNews scraper for AI-related posts using Algolia search API
+"""
+
 import requests
 from typing import Any
-from datetime import datetime, timedelta
-from readonly_ai.utils import is_valid_webpage_url
+from datetime import datetime, timedelta, timezone
+from readonly_ai.utils import is_valid_webpage_url, format_utc_datetime
 from readonly_ai.database import create_database, insert_article
+
 
 # Tags to exclude from HackerNews results
 HN_EXCLUDED_TAGS = ["show_hn", "ask_hn", "comment", "poll", "pollopt"]
@@ -11,7 +16,9 @@ HN_EXCLUDED_TAGS = ["show_hn", "ask_hn", "comment", "poll", "pollopt"]
 def get_hackernews_posts(hours_back: int, keywords: list[str]) -> list[dict[str, Any]]:
     """Get recent AI-related posts from HackerNews using Algolia search API"""
     posts = []
-    cutoff_timestamp = int((datetime.now() - timedelta(hours=hours_back)).timestamp())
+    cutoff_timestamp = int(
+        (datetime.now(timezone.utc) - timedelta(hours=hours_back)).timestamp()
+    )
     base_url = "https://hn.algolia.com/api/v1/search"
     seen_ids = set()
 
@@ -26,7 +33,7 @@ def get_hackernews_posts(hours_back: int, keywords: list[str]) -> list[dict[str,
         }
 
         try:
-            print(f"    - Searching for: {keyword}")
+            print(f"[DEBUG] Searching for: {keyword}")
             response = requests.get(base_url, params=params)
             response.raise_for_status()
             data = response.json()
@@ -51,7 +58,9 @@ def get_hackernews_posts(hours_back: int, keywords: list[str]) -> list[dict[str,
 
                 hn_thread_url = f"https://news.ycombinator.com/item?id={hit_id}"
                 created_timestamp = hit.get("created_at_i", 0)
-                created_time = datetime.fromtimestamp(created_timestamp)
+                created_time = datetime.fromtimestamp(
+                    created_timestamp, tz=timezone.utc
+                )
 
                 # Get text content if available (for Ask HN, Show HN posts)
                 content = hit.get("story_text", "") or ""
@@ -62,27 +71,25 @@ def get_hackernews_posts(hours_back: int, keywords: list[str]) -> list[dict[str,
                         "title": hit.get("title", ""),
                         "external_url": external_url,
                         "hn_thread_url": hn_thread_url,
-                        "created": created_time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "created": format_utc_datetime(created_time),
                         "content": content,
                         "keyword": keyword,
                     }
                 )
 
         except requests.RequestException as e:
-            print(f"    - Error searching for keyword '{keyword}': {e}")
+            print(f"[ERROR] Error searching for keyword '{keyword}': {e}")
             continue
 
     return posts
 
 
-def run_hackernews_scraper(hours_back: int, keywords: list[str]):
+def run_hackernews_scraper(hours_back: int, keywords: list[str]) -> None:
     """Run HackerNews scraper and save to database"""
-    print("Running HackerNews scraper...")
+    print("[INFO] Running HackerNews scraper...")
 
     try:
-        # Initialize database
         create_database()
-
         hn_posts = get_hackernews_posts(hours_back, keywords)
         total_new_posts = 0
 
@@ -102,9 +109,9 @@ def run_hackernews_scraper(hours_back: int, keywords: list[str]):
                 total_new_posts += 1
 
         print(
-            f"HackerNews scraper completed. Added {total_new_posts} new posts to database."
+            f"[INFO] HackerNews scraper completed. Added {total_new_posts} new posts to database."
         )
 
     except Exception as e:
-        print(f"HackerNews scraper failed: {e}")
+        print(f"[ERROR] HackerNews scraper failed: {e}")
         raise
