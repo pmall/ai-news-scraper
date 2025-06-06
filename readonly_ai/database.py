@@ -55,11 +55,11 @@ def get_database_engine():
 
 
 def create_database() -> None:
-    """Create the database and table if they don't exist"""
+    """Create the database and tables if they don't exist"""
     engine = get_database_engine()
 
     with engine.connect() as conn:
-        # Create the articles table - all essential fields are NOT NULL
+        # Create the articles table - removed relevance_score
         conn.execute(
             text(
                 """
@@ -74,23 +74,44 @@ def create_database() -> None:
                 date TEXT NOT NULL,
                 article_id TEXT NOT NULL,
                 article_url TEXT NOT NULL,
-                relevance_score INTEGER,
                 PRIMARY KEY (source, id)
             )
         """
             )
         )
 
-        # Create indexes
+        # Create the articles_analyses table
+        conn.execute(
+            text(
+                """
+            CREATE TABLE IF NOT EXISTS articles_analyses (
+                article_id TEXT PRIMARY KEY,
+                relevance_score INTEGER NOT NULL,
+                category INTEGER NOT NULL,
+                tags JSON NOT NULL,
+                FOREIGN KEY (article_id) REFERENCES articles(article_id)
+            )
+        """
+            )
+        )
+
+        # Create indexes for articles table
         conn.execute(
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_article_id_unique ON articles (article_id)"
             )
         )
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_date ON articles (date)"))
+
+        # Create indexes for articles_analyses table
         conn.execute(
             text(
-                "CREATE INDEX IF NOT EXISTS idx_relevance_score ON articles (relevance_score)"
+                "CREATE INDEX IF NOT EXISTS idx_relevance_score ON articles_analyses (relevance_score)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_category ON articles_analyses (category)"
             )
         )
 
@@ -205,8 +226,8 @@ def insert_article(
         sql_query = text(
             """
             INSERT INTO articles
-            (parser, source, id, subset, thread_url, title, content, date, article_id, article_url, relevance_score)
-            VALUES (:parser, :source, :id, :subset, :thread_url, :title, :content, :date, :article_id, :article_url, NULL)
+            (parser, source, id, subset, thread_url, title, content, date, article_id, article_url)
+            VALUES (:parser, :source, :id, :subset, :thread_url, :title, :content, :date, :article_id, :article_url)
             ON CONFLICT (source, id) DO NOTHING
         """
         )
@@ -214,8 +235,8 @@ def insert_article(
         sql_query = text(
             """
             INSERT OR IGNORE INTO articles
-            (parser, source, id, subset, thread_url, title, content, date, article_id, article_url, relevance_score)
-            VALUES (:parser, :source, :id, :subset, :thread_url, :title, :content, :date, :article_id, :article_url, NULL)
+            (parser, source, id, subset, thread_url, title, content, date, article_id, article_url)
+            VALUES (:parser, :source, :id, :subset, :thread_url, :title, :content, :date, :article_id, :article_url)
         """
         )
 
@@ -229,29 +250,38 @@ def insert_article(
         return False
 
 
-def get_recent_articles(hours_back: int, min_relevance_score: int) -> dict[str, dict]:
-    """Get all unique articles from the last N hours with their sources"""
+def get_recent_articles(
+    hours_back: int, min_relevance_score: int, category: int
+) -> dict[str, dict]:
+    """Get all unique articles from the last N hours with specified relevance score and category"""
     engine = get_database_engine()
 
-    query_params: dict[str, Any] = {"min_relevance": min_relevance_score}
+    query_params: dict[str, Any] = {
+        "min_relevance": min_relevance_score,
+        "category": category,
+    }
 
     if DATABASE_TYPE == "postgresql":
         query_params["hours_back_interval"] = hours_back
         sql_query = """
-            SELECT parser, source, id, subset, thread_url, title, content, date, article_id, article_url
-            FROM articles
-            WHERE date >= (CURRENT_TIMESTAMP - INTERVAL :hours_back_interval HOUR)
-            AND relevance_score >= :min_relevance
-            ORDER BY date DESC
+            SELECT a.parser, a.source, a.id, a.subset, a.thread_url, a.title, a.content, a.date, a.article_id, a.article_url
+            FROM articles a
+            INNER JOIN articles_analyses aa ON a.article_id = aa.article_id
+            WHERE a.date >= (CURRENT_TIMESTAMP - INTERVAL :hours_back_interval HOUR)
+            AND aa.relevance_score >= :min_relevance
+            AND aa.category = :category
+            ORDER BY a.date DESC
         """
     else:  # sqlite
         query_params["hours_back_delta_str"] = f"-{hours_back} hours"
         sql_query = """
-            SELECT parser, source, id, subset, thread_url, title, content, date, article_id, article_url
-            FROM articles
-            WHERE datetime(date) >= datetime('now', :hours_back_delta_str)
-            AND relevance_score >= :min_relevance
-            ORDER BY date DESC
+            SELECT a.parser, a.source, a.id, a.subset, a.thread_url, a.title, a.content, a.date, a.article_id, a.article_url
+            FROM articles a
+            INNER JOIN articles_analyses aa ON a.article_id = aa.article_id
+            WHERE datetime(a.date) >= datetime('now', :hours_back_delta_str)
+            AND aa.relevance_score >= :min_relevance
+            AND aa.category = :category
+            ORDER BY a.date DESC
         """
 
     result_dict: dict[str, dict] = {}
@@ -300,17 +330,18 @@ def get_recent_articles(hours_back: int, min_relevance_score: int) -> dict[str, 
     return result_dict
 
 
-def get_unscored_articles(
+def get_unanalysed_articles(
     limit: Optional[int] = None,
-) -> list[tuple[str, str, str, str]]:
-    """Get articles with null relevance scores"""
+) -> list[tuple[str, str, str]]:
+    """Get articles with no entry in articles_analyses table"""
     engine = get_database_engine()
 
     sql_query_base = """
-        SELECT source, id, title, content
-        FROM articles
-        WHERE relevance_score IS NULL
-        ORDER BY date DESC
+        SELECT a.article_id, a.title, a.content
+        FROM articles a
+        LEFT JOIN articles_analyses aa ON a.article_id = aa.article_id
+        WHERE aa.article_id IS NULL
+        ORDER BY a.date DESC
     """
     query_params: dict[str, Any] = {}
 
@@ -323,47 +354,62 @@ def get_unscored_articles(
     try:
         with engine.connect() as conn:
             result = conn.execute(text(sql_query_final), query_params).fetchall()
-            return [
-                (str(row[0]), str(row[1]), str(row[2]), str(row[3])) for row in result
-            ]
+            return [(str(row[0]), str(row[1]), str(row[2])) for row in result]
     except SQLAlchemyError as e:
-        print(f"Database error in get_unscored_articles: {e}")
+        print(f"Database error in get_unanalysed_articles: {e}")
         return []
 
 
-def update_relevance_scores(scores: list[tuple[str, str, int]]) -> int:
-    """Update relevance scores in database
+def insert_article_analysis(analyses: list[tuple[str, int, int, list[str]]]) -> int:
+    """Insert article analyses into database
     Args:
-        scores: List of tuples (source, article_id_from_source, score)
+        analyses: List of tuples (article_id, relevance_score, category, tags_list)
     Returns:
-        Number of articles updated
+        Number of analyses inserted
     """
     engine = get_database_engine()
-    updated_count = 0
+    inserted_count = 0
 
-    sql_update = text(
+    if DATABASE_TYPE == "postgresql":
+        sql_insert = text(
+            """
+            INSERT INTO articles_analyses (article_id, relevance_score, category, tags)
+            VALUES (:article_id, :relevance_score, :category, :tags)
+            ON CONFLICT (article_id) DO UPDATE SET
+                relevance_score = EXCLUDED.relevance_score,
+                category = EXCLUDED.category,
+                tags = EXCLUDED.tags
         """
-        UPDATE articles
-        SET relevance_score = :score
-        WHERE source = :source AND id = :article_id_from_source
-    """
-    )
+        )
+    else:  # sqlite
+        sql_insert = text(
+            """
+            INSERT OR REPLACE INTO articles_analyses (article_id, relevance_score, category, tags)
+            VALUES (:article_id, :relevance_score, :category, :tags)
+        """
+        )
 
     try:
         with engine.connect() as conn:
-            for source_val, article_id_val, score_val in scores:
+            for article_id, relevance_score, category, tags in analyses:
+                # Convert tags list to JSON string
+                import json
+
+                tags_json = json.dumps(tags)
+
                 params = {
-                    "score": score_val,
-                    "source": source_val,
-                    "article_id_from_source": article_id_val,
+                    "article_id": article_id,
+                    "relevance_score": relevance_score,
+                    "category": category,
+                    "tags": tags_json,
                 }
-                result = conn.execute(sql_update, params)
-                updated_count += result.rowcount
+                result = conn.execute(sql_insert, params)
+                inserted_count += result.rowcount
             conn.commit()
     except SQLAlchemyError as e:
-        print(f"Database error in update_relevance_scores: {e}")
+        print(f"Database error in insert_article_analysis: {e}")
 
-    return updated_count
+    return inserted_count
 
 
 def get_database_stats() -> dict[str, Any]:
@@ -376,6 +422,7 @@ def get_database_stats() -> dict[str, Any]:
         "by_source": {},
         "unscored_articles": 0,
         "by_relevance": {},
+        "by_category": {},
     }
 
     try:
@@ -401,7 +448,13 @@ def get_database_stats() -> dict[str, Any]:
             stats["by_source"] = dict(results)  # type: ignore
 
             result = conn.execute(
-                text("SELECT COUNT(*) FROM articles WHERE relevance_score IS NULL")
+                text(
+                    """
+                    SELECT COUNT(*) FROM articles a
+                    LEFT JOIN articles_analyses aa ON a.article_id = aa.article_id
+                    WHERE aa.article_id IS NULL
+                """
+                )
             ).scalar_one_or_none()
             stats["unscored_articles"] = result if result is not None else 0
 
@@ -412,16 +465,35 @@ def get_database_stats() -> dict[str, Any]:
                         WHEN relevance_score >= 80 THEN 'High (80-100)'
                         WHEN relevance_score >= 50 THEN 'Medium (50-79)'
                         WHEN relevance_score >= 20 THEN 'Low (20-49)'
-                        WHEN relevance_score IS NOT NULL THEN 'Very Low (0-19)'
-                        ELSE 'Unscored'
+                        ELSE 'Very Low (0-19)'
                     END as score_range,
                     COUNT(*) as count
-                FROM articles
+                FROM articles_analyses
                 GROUP BY score_range
             """
             )
             results = conn.execute(relevance_sql).fetchall()
             stats["by_relevance"] = dict(results)  # type: ignore
+
+            category_sql = text(
+                """
+                SELECT
+                    CASE
+                        WHEN category = 1 THEN 'New Models & Releases'
+                        WHEN category = 2 THEN 'Research & Breakthroughs'
+                        WHEN category = 3 THEN 'Industry News'
+                        WHEN category = 4 THEN 'Tools & Applications'
+                        WHEN category = 5 THEN 'Policy & Regulation'
+                        WHEN category = 6 THEN 'Unrelated'
+                        ELSE 'Unknown'
+                    END as category_name,
+                    COUNT(*) as count
+                FROM articles_analyses
+                GROUP BY category
+            """
+            )
+            results = conn.execute(category_sql).fetchall()
+            stats["by_category"] = dict(results)  # type: ignore
 
     except SQLAlchemyError as e:
         print(f"Database error in get_database_stats: {e}")

@@ -6,8 +6,8 @@ Collects AI news from Reddit, HackerNews, and RSS feeds
 
 import argparse
 from dotenv import load_dotenv
-from readonly_ai.score import run_relevance_scoring
 from readonly_ai.summary import run_summary_generator
+from readonly_ai.analysis import run_article_analysis
 from readonly_ai.scrapers import (
     run_reddit_scraper,
     run_hackernews_scraper,
@@ -91,12 +91,12 @@ def main():
     parser_all.set_defaults(func=lambda args: run_all(args.hb))
 
     # --- Scoring command ---
-    parser_score = subparsers.add_parser(
-        "score",
-        help="Run relevance scoring.",
-        description="Performs relevance scoring on the scraped news articles. The output of this might be used by the 'summary' command.",
+    parser_analysis = subparsers.add_parser(
+        "analysis",
+        help="Run analysis on articles.",
+        description="Performs relevance scoring, categorization and tagging on the scraped news articles. The output of this might be used by the 'summary' command.",
     )
-    parser_score.set_defaults(func=lambda args: run_relevance_scoring())
+    parser_analysis.set_defaults(func=lambda args: run_article_analysis())
 
     # --- Summary command ---
     parser_summary = subparsers.add_parser(

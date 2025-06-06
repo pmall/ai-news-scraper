@@ -1,9 +1,12 @@
 SCORING_PROMPT_TEMPLATE = """
-You are an AI expert tasked with scoring articles based on their relevance to artificial intelligence.
+You are an AI expert tasked with analyzing articles for relevance to artificial intelligence, categorizing them, and extracting relevant tags.
 
-Score each article from 0-100 based on how relevant it is to artificial intelligence, machine learning, LLMs, neural networks, AI research, AI applications, or AI industry developments.
+For each article, provide:
+1. A relevance score (0-100)
+2. A category (1-6)  
+3. A list of relevant tags
 
-Scoring guidelines:
+SCORING GUIDELINES (0-100):
 - 90-100: Core AI/ML content (new models, AI research breakthroughs, AI company developments)
 - 70-89: AI applications, AI tools, AI industry news
 - 50-69: Technology with significant AI components
@@ -11,11 +14,31 @@ Scoring guidelines:
 - 10-29: Brief AI mentions in broader context
 - 0-9: No meaningful AI relevance
 
-Return ONLY a JSON array with scores in the same order as the articles below:
+CATEGORIES (1-6):
+1. New Models & Releases (new AI models, model updates, version releases)
+2. Research & Breakthroughs (scientific papers, research findings, technical advances)
+3. Industry News (company announcements, funding, partnerships, business developments)
+4. Tools & Applications (new AI tools, software, practical applications)
+5. Policy & Regulation (government actions, regulations, policy discussions)
+6. Unrelated (does not fit meaningfully in categories 1-5, or has very low AI relevance)
+
+TAGS GUIDELINES:
+- Extract 3-8 relevant tags per article
+- Include company names, model names, technology types, application domains
+- Use consistent naming (e.g., "GPT-4", "OpenAI", "natural-language-processing", "computer-vision")
+- Keep tags concise and lowercase with hyphens for multi-word tags
+- Focus on AI/ML specific terms and key entities
+
+Return ONLY a JSON array with objects containing score, category, and tags for each article in the same order:
 
 $articles
 
-Respond with exactly $n scores as a JSON array: [score1, score2, ...]
+Respond with exactly $n objects as a JSON array:
+[
+  {"score": 85, "category": 1, "tags": ["openai", "gpt-4", "language-model", "api"]},
+  {"score": 92, "category": 2, "tags": ["deepmind", "alphafold", "protein-folding", "research"]},
+  ...
+]
 """.strip()
 
 SUMMARY_PROMPT_TEMPLATE = f"""
