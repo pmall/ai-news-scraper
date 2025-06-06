@@ -5,15 +5,6 @@ from datetime import datetime, timedelta
 from readonly_ai.utils import is_valid_webpage_url
 from readonly_ai.database import create_database, insert_article
 
-# RSS feeds - now with source names
-RSS_FEEDS = {
-    "TechCrunch AI": "https://techcrunch.com/tag/artificial-intelligence/feed/",
-    "MIT Tech Review": "https://www.technologyreview.com/topic/artificial-intelligence/feed/",
-    "Berkeley AI Research": "https://bair.berkeley.edu/blog/feed.xml",
-    "ML Mastery": "https://machinelearningmastery.com/blog/feed/",
-    "Google Research": "https://research.google/blog/rss/",
-}
-
 
 def parse_date_fallback(date_string: Optional[str]) -> Optional[datetime]:
     """Fallback date parsing for when feedparser fails"""
@@ -81,7 +72,7 @@ def get_rss_posts(
     return posts
 
 
-def run_rss_scraper(hours_back: int):
+def run_rss_scraper(hours_back: int, rssfeeds: dict[str, str]):
     """Run RSS scraper and save to database"""
     print("Running RSS scraper...")
 
@@ -91,7 +82,7 @@ def run_rss_scraper(hours_back: int):
 
         total_new_posts = 0
 
-        for source_name, rss_url in RSS_FEEDS.items():
+        for source_name, rss_url in rssfeeds.items():
             print(f"  - {source_name}")
             posts = get_rss_posts(source_name, rss_url, hours_back)
 

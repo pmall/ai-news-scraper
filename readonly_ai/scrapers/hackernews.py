@@ -4,35 +4,11 @@ from datetime import datetime, timedelta
 from readonly_ai.utils import is_valid_webpage_url
 from readonly_ai.database import create_database, insert_article
 
-# HackerNews AI keywords
-HN_AI_KEYWORDS = [
-    "AI",
-    "artificial intelligence",
-    "machine learning",
-    "ML",
-    "LLM",
-    "neural network",
-    "deep learning",
-    "GPT",
-    "ChatGPT",
-    "OpenAI",
-    "transformer",
-    "generative",
-    "diffusion",
-    "stable diffusion",
-    "Claude",
-    "Gemini",
-    "anthropic",
-    "computer vision",
-    "NLP",
-    "natural language processing",
-]
-
 # Tags to exclude from HackerNews results
 HN_EXCLUDED_TAGS = ["show_hn", "ask_hn", "comment", "poll", "pollopt"]
 
 
-def get_hackernews_posts(hours_back: int) -> list[dict[str, Any]]:
+def get_hackernews_posts(hours_back: int, keywords: list[str]) -> list[dict[str, Any]]:
     """Get recent AI-related posts from HackerNews using Algolia search API"""
     posts = []
     cutoff_timestamp = int((datetime.now() - timedelta(hours=hours_back)).timestamp())
@@ -40,7 +16,7 @@ def get_hackernews_posts(hours_back: int) -> list[dict[str, Any]]:
     seen_ids = set()
 
     # Search for each keyword individually for reliable results
-    for keyword in HN_AI_KEYWORDS:
+    for keyword in keywords:
         params = {
             "query": keyword,
             "tags": "story",
@@ -99,7 +75,7 @@ def get_hackernews_posts(hours_back: int) -> list[dict[str, Any]]:
     return posts
 
 
-def run_hackernews_scraper(hours_back: int):
+def run_hackernews_scraper(hours_back: int, keywords: list[str]):
     """Run HackerNews scraper and save to database"""
     print("Running HackerNews scraper...")
 
@@ -107,7 +83,7 @@ def run_hackernews_scraper(hours_back: int):
         # Initialize database
         create_database()
 
-        hn_posts = get_hackernews_posts(hours_back)
+        hn_posts = get_hackernews_posts(hours_back, keywords)
         total_new_posts = 0
 
         for post in hn_posts:

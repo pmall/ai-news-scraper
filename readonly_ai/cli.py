@@ -16,25 +16,68 @@ from readonly_ai.scrapers import (
 
 load_dotenv()
 
+REDDIT_SUBREDDITS = [
+    "artificial",  # https://www.reddit.com/r/artificial/
+    "ArtificialInteligence",  # https://www.reddit.com/r/ArtificialInteligence/
+    "MachineLearning",  # https://www.reddit.com/r/MachineLearning/
+    "machinelearningnews",  # https://www.reddit.com/r/machinelearningnews/
+    "ChatGPT",  # https://www.reddit.com/r/ChatGPT/
+    "OpenAI",  # https://www.reddit.com/r/OpenAI/
+    "ClaudeAI",  # https://www.reddit.com/r/ClaudeAI/
+    "GoogleGeminiAI",  # https://www.reddit.com/r/GoogleGeminiAI/
+]
+
+HN_AI_KEYWORDS = [
+    "AI",
+    "artificial intelligence",
+    "machine learning",
+    "ML",
+    "LLM",
+    "neural network",
+    "deep learning",
+    "GPT",
+    "ChatGPT",
+    "OpenAI",
+    "transformer",
+    "generative",
+    "diffusion",
+    "stable diffusion",
+    "Claude",
+    "Gemini",
+    "anthropic",
+    "computer vision",
+    "NLP",
+    "natural language processing",
+]
+
+RSS_FEEDS = {
+    "TechCrunch AI": "https://techcrunch.com/tag/artificial-intelligence/feed/",
+    "MIT Tech Review": "https://www.technologyreview.com/topic/artificial-intelligence/feed/",
+    "Berkeley AI Research": "https://bair.berkeley.edu/blog/feed.xml",
+    "ML Mastery": "https://machinelearningmastery.com/blog/feed/",
+    "Google Research": "https://research.google/blog/rss/",
+}
+
 
 def run_all(hours_back: int):
-    """Run all scrapers and generate summary"""
-    print("Running all scrapers...")
+    """Run all scrapers and analyzers"""
+    print("Running all scrapers and analyzers...")
 
     scrapers = [
-        ("Reddit", run_reddit_scraper),
-        ("HackerNews", run_hackernews_scraper),
-        ("RSS", run_rss_scraper),
+        ("Reddit", lambda: run_reddit_scraper(hours_back, REDDIT_SUBREDDITS)),
+        ("HackerNews", lambda: run_hackernews_scraper(hours_back, HN_AI_KEYWORDS)),
+        ("RSS", lambda: run_rss_scraper(hours_back, RSS_FEEDS)),
+        ("Analysis", lambda: run_article_analysis()),
     ]
 
     for name, scraper_func in scrapers:
         try:
-            scraper_func(hours_back)
+            scraper_func()
         except Exception as e:
-            print(f"{name} scraper failed: {e}")
-            print("Continuing with next scraper...")
+            print(f"{name} script failed: {e}")
+            print("Continuing with next script...")
 
-    print("All scrapers completed!")
+    print("All scripts completed!")
 
 
 def main():
@@ -61,7 +104,9 @@ def main():
         help="Run Reddit scraper only.",
         description="Scrapes news from Reddit for a specified number of hours back.",
     )
-    parser_reddit.set_defaults(func=lambda args: run_reddit_scraper(args.hb))
+    parser_reddit.set_defaults(
+        func=lambda args: run_reddit_scraper(args.hb, REDDIT_SUBREDDITS)
+    )
 
     # HackerNews command
     parser_hackernews = subparsers.add_parser(
@@ -70,7 +115,9 @@ def main():
         help="Run HackerNews scraper only.",
         description="Scrapes news from HackerNews for a specified number of hours back.",
     )
-    parser_hackernews.set_defaults(func=lambda args: run_hackernews_scraper(args.hb))
+    parser_hackernews.set_defaults(
+        func=lambda args: run_hackernews_scraper(args.hb, HN_AI_KEYWORDS)
+    )
 
     # RSS command
     parser_rss = subparsers.add_parser(
@@ -79,7 +126,7 @@ def main():
         help="Run RSS scraper only.",
         description="Scrapes news from RSS feeds for a specified number of hours back.",
     )
-    parser_rss.set_defaults(func=lambda args: run_rss_scraper(args.hb))
+    parser_rss.set_defaults(func=lambda args: run_rss_scraper(args.hb, RSS_FEEDS))
 
     # All command
     parser_all = subparsers.add_parser(

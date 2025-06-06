@@ -3,18 +3,6 @@ from datetime import datetime, timedelta
 from readonly_ai.utils import setup_reddit, is_valid_webpage_url
 from readonly_ai.database import create_database, insert_article
 
-# Reddit configuration
-REDDIT_SUBREDDITS = [
-    "artificial",  # https://www.reddit.com/r/artificial/
-    "ArtificialInteligence",  # https://www.reddit.com/r/ArtificialInteligence/
-    "MachineLearning",  # https://www.reddit.com/r/MachineLearning/
-    "machinelearningnews",  # https://www.reddit.com/r/machinelearningnews/
-    "ChatGPT",  # https://www.reddit.com/r/ChatGPT/
-    "OpenAI",  # https://www.reddit.com/r/OpenAI/
-    "ClaudeAI",  # https://www.reddit.com/r/ClaudeAI/
-    "GoogleGeminiAI",  # https://www.reddit.com/r/GoogleGeminiAI/
-]
-
 
 def get_reddit_posts(
     reddit, subreddit_name: str, hours_back: int
@@ -52,7 +40,7 @@ def get_reddit_posts(
     return posts
 
 
-def run_reddit_scraper(hours_back: int):
+def run_reddit_scraper(hours_back: int, subreddits: list[str]):
     """Run Reddit scraper and save to database"""
     print("Running Reddit scraper...")
 
@@ -63,7 +51,7 @@ def run_reddit_scraper(hours_back: int):
         reddit = setup_reddit()
         total_new_posts = 0
 
-        for subreddit in REDDIT_SUBREDDITS:
+        for subreddit in subreddits:
             print(f"  - r/{subreddit}")
             posts = get_reddit_posts(reddit, subreddit, hours_back)
 
