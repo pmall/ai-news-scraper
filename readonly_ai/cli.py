@@ -4,6 +4,8 @@ Readonly AI - Daily AI news aggregator
 Collects AI news from Reddit, HackerNews, and RSS feeds
 """
 
+import os
+import json
 import argparse
 from dotenv import load_dotenv
 from readonly_ai.summary import run_summary_generator
@@ -16,63 +18,56 @@ from readonly_ai.scrapers import (
 
 load_dotenv()
 
-REDDIT_SUBREDDITS = [
-    "artificial",  # https://www.reddit.com/r/artificial/
-    "ArtificialInteligence",  # https://www.reddit.com/r/ArtificialInteligence/
-    "MachineLearning",  # https://www.reddit.com/r/MachineLearning/
-    "machinelearningnews",  # https://www.reddit.com/r/machinelearningnews/
-    "ChatGPT",  # https://www.reddit.com/r/ChatGPT/
-    "OpenAI",  # https://www.reddit.com/r/OpenAI/
-    "ClaudeAI",  # https://www.reddit.com/r/ClaudeAI/
-    "GoogleGeminiAI",  # https://www.reddit.com/r/GoogleGeminiAI/
-]
 
-HN_AI_KEYWORDS = [
-    "AI",
-    "artificial intelligence",
-    "machine learning",
-    "ML",
-    "LLM",
-    "neural network",
-    "deep learning",
-    "GPT",
-    "ChatGPT",
-    "OpenAI",
-    "transformer",
-    "generative",
-    "diffusion",
-    "stable diffusion",
-    "Claude",
-    "Gemini",
-    "anthropic",
-    "computer vision",
-    "NLP",
-    "natural language processing",
-]
+def load_and_validate_config(path: str) -> dict:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Config file not found: {path}")
+    try:
+        with open(path, "r") as f:
+            config = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Failed to parse config file '{path}': {e}")
 
-RSS_FEEDS = {
-    "TechCrunch AI": "https://techcrunch.com/tag/artificial-intelligence/feed/",
-    "MIT Tech Review": "https://www.technologyreview.com/topic/artificial-intelligence/feed/",
-    "Berkeley AI Research": "https://bair.berkeley.edu/blog/feed.xml",
-    "ML Mastery": "https://machinelearningmastery.com/blog/feed/",
-    "Google Research": "https://research.google/blog/rss/",
-}
+    required_keys = ["reddit", "hackernews", "rssfeeds"]
+    for key in required_keys:
+        if key not in config:
+            raise KeyError(f"Missing required key in config: '{key}'")
+
+    return config
 
 
-def run_all(hours_back: int):
-    """Run all scrapers and analyzers"""
+def handle_reddit(args):
+    config = load_and_validate_config(args.config)
+    run_reddit_scraper(args.hb, config["reddit"])
+
+
+def handle_hackernews(args):
+    config = load_and_validate_config(args.config)
+    run_hackernews_scraper(args.hb, config["hackernews"])
+
+
+def handle_rss(args):
+    config = load_and_validate_config(args.config)
+    run_rss_scraper(args.hb, config["rssfeeds"])
+
+
+def handle_all(args):
+    config = load_and_validate_config(args.config)
     print("Running all scrapers and analyzers...")
 
     scrapers = [
-        ("Reddit", lambda: run_reddit_scraper(hours_back, REDDIT_SUBREDDITS)),
-        ("HackerNews", lambda: run_hackernews_scraper(hours_back, HN_AI_KEYWORDS)),
-        ("RSS", lambda: run_rss_scraper(hours_back, RSS_FEEDS)),
-        ("Analysis", lambda: run_article_analysis()),
+        ("Reddit", lambda: run_reddit_scraper(args.hb, config["reddit"])),
+        (
+            "HackerNews",
+            lambda: run_hackernews_scraper(args.hb, config["hackernews"]),
+        ),
+        ("RSS", lambda: run_rss_scraper(args.hb, config["rssfeeds"])),
+        ("Analysis", run_article_analysis),
     ]
 
-    for name, scraper_func in scrapers:
+    for name, func in scrapers:
         try:
-            scraper_func()
+            func()
         except Exception as e:
             print(f"{name} script failed: {e}")
             print("Continuing with next script...")
@@ -80,109 +75,65 @@ def run_all(hours_back: int):
     print("All scripts completed!")
 
 
+def handle_analysis(_):
+    run_article_analysis()
+
+
+def handle_summary(args):
+    run_summary_generator(args.hb, args.score, args.language)
+
+
 def main():
-    """Main function with command line argument parsing using subparsers."""
     parser = argparse.ArgumentParser(description="AI News Scraper")
-    subparsers = parser.add_subparsers(
-        dest="command", help="Available commands", required=True
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    scraper_parent = argparse.ArgumentParser(add_help=False)
+    scraper_parent.add_argument("--hb", type=int, required=True, help="Hours back")
+    scraper_parent.add_argument(
+        "--config", type=str, default="./config.json", help="Path to config.json"
     )
 
-    # --- Scraper commands ---
-    # Parent parser for common arguments like --hb
-    scraper_parser_parent = argparse.ArgumentParser(add_help=False)
-    scraper_parser_parent.add_argument(
-        "--hb",
-        type=int,
-        required=True,
-        help="Scrape articles from the last 'hb' hours.",
-    )
-
-    # Reddit command
+    # Reddit
     parser_reddit = subparsers.add_parser(
-        "reddit",
-        parents=[scraper_parser_parent],
-        help="Run Reddit scraper only.",
-        description="Scrapes news from Reddit for a specified number of hours back.",
+        "reddit", parents=[scraper_parent], help="Run Reddit scraper"
     )
-    parser_reddit.set_defaults(
-        func=lambda args: run_reddit_scraper(args.hb, REDDIT_SUBREDDITS)
-    )
+    parser_reddit.set_defaults(func=handle_reddit)
 
-    # HackerNews command
-    parser_hackernews = subparsers.add_parser(
-        "hackernews",
-        parents=[scraper_parser_parent],
-        help="Run HackerNews scraper only.",
-        description="Scrapes news from HackerNews for a specified number of hours back.",
+    # HackerNews
+    parser_hn = subparsers.add_parser(
+        "hackernews", parents=[scraper_parent], help="Run HackerNews scraper"
     )
-    parser_hackernews.set_defaults(
-        func=lambda args: run_hackernews_scraper(args.hb, HN_AI_KEYWORDS)
-    )
+    parser_hn.set_defaults(func=handle_hackernews)
 
-    # RSS command
+    # RSS
     parser_rss = subparsers.add_parser(
-        "rss",
-        parents=[scraper_parser_parent],
-        help="Run RSS scraper only.",
-        description="Scrapes news from RSS feeds for a specified number of hours back.",
+        "rss", parents=[scraper_parent], help="Run RSS scraper"
     )
-    parser_rss.set_defaults(func=lambda args: run_rss_scraper(args.hb, RSS_FEEDS))
+    parser_rss.set_defaults(func=handle_rss)
 
-    # All command
+    # All
     parser_all = subparsers.add_parser(
-        "all",
-        parents=[scraper_parser_parent],
-        help="Run all scrapers.",
-        description="Runs all available scrapers (Reddit, HackerNews, RSS) for a specified number of hours back.",
+        "all", parents=[scraper_parent], help="Run all scrapers"
     )
-    parser_all.set_defaults(func=lambda args: run_all(args.hb))
+    parser_all.set_defaults(func=handle_all)
 
-    # --- Scoring command ---
-    parser_analysis = subparsers.add_parser(
-        "analysis",
-        help="Run analysis on articles.",
-        description="Performs relevance scoring, categorization and tagging on the scraped news articles. The output of this might be used by the 'summary' command.",
-    )
-    parser_analysis.set_defaults(func=lambda args: run_article_analysis())
+    # Analysis
+    parser_analysis = subparsers.add_parser("analysis", help="Run article analysis")
+    parser_analysis.set_defaults(func=handle_analysis)
 
-    # --- Summary command ---
-    parser_summary = subparsers.add_parser(
-        "summary",
-        help="Generate summary.",
-        description="Generates a summary of news articles based on specified hours back and a scoring input.",
+    # Summary
+    parser_summary = subparsers.add_parser("summary", help="Generate summary")
+    parser_summary.add_argument("--hb", type=int, required=True, help="Hours back")
+    parser_summary.add_argument(
+        "--score", type=int, required=True, help="Min relevance score"
     )
     parser_summary.add_argument(
-        "--hb",
-        type=int,
-        required=True,
-        help="Summarize articles from the last 'hb' hours.",
+        "--language", type=str, required=True, help="Summary language (en|fr)"
     )
-    parser_summary.add_argument(
-        "--score",
-        type=int,
-        required=True,
-        help="Min relevance score.",
-    )
-    parser_summary.add_argument(
-        "--language",
-        type=str,
-        required=True,
-        help="Summary language (en|fr]).",
-    )
-    parser_summary.set_defaults(
-        func=lambda args: run_summary_generator(args.hb, args.score, args.language)
-    )
+    parser_summary.set_defaults(func=handle_summary)
 
     args = parser.parse_args()
-
-    # Call the function associated with the chosen command
-    if hasattr(args, "func"):
-        args.func(args)
-    else:
-        # This case should ideally not be reached if subparsers are required
-        # and each subparser has a default function.
-        # However, it's good practice for older Python versions or complex setups.
-        parser.print_help()
+    args.func(args)
 
 
 if __name__ == "__main__":

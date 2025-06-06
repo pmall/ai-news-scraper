@@ -1,0 +1,41 @@
+{
+  "reddit": [
+      "artificial",
+      "ArtificialInteligence",
+      "MachineLearning",
+      "machinelearningnews",
+      "ChatGPT",
+      "OpenAI",
+      "ClaudeAI",
+      "GoogleGeminiAI"
+  ],
+  "hackernews": [
+      "AI",
+      "artificial intelligence",
+      "machine learning",
+      "ML",
+      "LLM",
+      "neural network",
+      "deep learning",
+      "GPT",
+      "ChatGPT",
+      "OpenAI",
+      "transformer",
+      "generative",
+      "diffusion",
+      "stable diffusion",
+      "Claude",
+      "Gemini",
+      "anthropic",
+      "computer vision",
+      "NLP",
+      "natural language processing"
+  ],
+  "rssfeeds": {
+      "TechCrunch AI": "https://techcrunch.com/tag/artificial-intelligence/feed/",
+      "MIT Tech Review": "https://www.technologyreview.com/topic/artificial-intelligence/feed/",
+      "Berkeley AI Research": "https://bair.berkeley.edu/blog/feed.xml",
+      "ML Mastery": "https://machinelearningmastery.com/blog/feed/",
+      "Google Research": "https://research.google/blog/rss/"
+  }
+}
