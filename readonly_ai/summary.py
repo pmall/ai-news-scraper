@@ -1,211 +1,150 @@
-"""
-AI Article Summarizer
-summarize articles on artificial intelligence based on their relevance score using Gemini
-"""
-
 import os
-import re
+import json
+import datetime
 from google import genai
-from pathlib import Path
-from datetime import datetime
-from readonly_ai.prompts import SUMMARY_PROMPT_TEMPLATE
+from google.genai import types
+from readonly_ai.prompts import SUMMARY_PROMPT_TEMPLATE_EN, SUMMARY_PROMPT_TEMPLATE_FR
 from readonly_ai.database import create_database, get_recent_articles
 from string import Template
+
+CATEGORIES = {
+    1: {"en": "New Models & Releases", "fr": "Nouveaux modèles et versions"},
+    2: {"en": "Research & Breakthroughs", "fr": "Recherche et percées"},
+    3: {"en": "Industry News", "fr": "Actualités du secteur"},
+    4: {"en": "Tools & Applications", "fr": "Outils et applications"},
+    5: {"en": "Policy & Regulation", "fr": "Politiques et régulation"},
+}
+
+
+def header(language: str) -> str:
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    headers = {
+        "en": f"# AI Daily News Report - {date_str}\n\n## Summary",
+        "fr": f"# Revue Quotidienne de l'IA - {date_str}\n\n## Résumé",
+    }
+
+    return headers[language]
+
+
+def prompt_template(language: str) -> str:
+    if language == "en":
+        return SUMMARY_PROMPT_TEMPLATE_EN
+    elif language == "fr":
+        return SUMMARY_PROMPT_TEMPLATE_FR
+    else:
+        raise ValueError("unsupported language")
 
 
 # Setup gemini client
 def setup_gemini():
+    """Initializes and returns the Gemini API client."""
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
     if not GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY environment variable is required")
+    return genai.Client(api_key=GEMINI_API_KEY)
 
-    return genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+def write_markdown_content(markdown_summary: str, language: str):
+    output_dir = f"./data/{language}"
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    current_datetime = datetime.datetime.now()
+    date_str = current_datetime.strftime("%Y-%m-%d")
+    timestamp_str = current_datetime.strftime("%H%M%S")
+    output_filename = os.path.join(
+        output_dir, f"{date_str} - {timestamp_str} - {language}.md"
+    )
+
+    # Save the summary to a markdown file
+    with open(output_filename, "w", encoding="utf-8") as f:
+        f.write(markdown_summary)
+    print(f"AI news summary generated and saved to {output_filename}")
 
 
-def generate_summary_with_sources(articles_dict: dict) -> tuple[str, dict]:
-    """Generate summary using Google Gemini with proper source attribution"""
-    s = Template(SUMMARY_PROMPT_TEMPLATE)
+def run_summary_generator(hours_back: int, min_relevance_score: int, language: str):
+    s = Template(prompt_template(language))
+
+    create_database()  # Ensure database is initialized
 
     client = setup_gemini()
 
-    # Prepare content for the prompt and build article mapping
-    content_lines = []
-    article_mapping = {}  # title -> (url, sources_info)
+    markdown_summary = f"{header(language)}\n\n"
 
-    for article_id, article_data in articles_dict.items():
-        article_url = article_data["article_url"]
-        sources = article_data["sources"]
+    for category_id, category_names in CATEGORIES.items():
+        category_name_log = category_names["en"]
 
-        # Combine unique titles from all sources
-        unique_titles = []
-        seen_titles = set()
-        for source in sources:
-            if source["title"] and source["title"].strip():
-                title_clean = source["title"].strip()
-                if title_clean not in seen_titles:
-                    unique_titles.append(title_clean)
-                    seen_titles.add(title_clean)
-        title = " | ".join(unique_titles) if unique_titles else "No title"
-
-        # Combine unique content from all sources
-        unique_content = []
-        seen_content = set()
-        for source in sources:
-            if source["content"] and source["content"].strip():
-                content_clean = source["content"].strip()
-                if content_clean not in seen_content:
-                    unique_content.append(content_clean)
-                    seen_content.add(content_clean)
-        all_content = " | ".join(unique_content)
-
-        # Parse sources for later use - check all parsers and thread URLs
-        sources_info = {"reddit": [], "hackernews": [], "other": []}
-        for source in sources:
-            parser = source["parser"]
-            thread_url = source["thread_url"]
-
-            if thread_url:  # Only add if thread_url exists
-                if parser == "reddit":
-                    sources_info["reddit"].append(thread_url)
-                elif parser == "hackernews":
-                    sources_info["hackernews"].append(thread_url)
-                else:
-                    # For RSS and other sources, thread_url might be discussion links
-                    sources_info["other"].append(thread_url)
-
-        # Store mapping for later reference
-        article_mapping[title] = {"url": article_url, "sources": sources_info}
-
-        content_lines.append(f"**{title}** - {article_url}")
-        if all_content:
-            content_lines.append(f"Context: {all_content[:300]}...")
-
-    content = "\n\n".join(content_lines)
-
-    prompt = s.substitute(content=content)
-
-    response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-
-    return response.text or "", article_mapping
-
-
-def extract_referenced_articles(summary_text: str, articles_dict: dict) -> list:
-    """Extract article URLs that were actually referenced in the summary"""
-    referenced_articles = []
-
-    # Find all markdown links in the summary and extract URLs
-    markdown_links = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", summary_text)
-
-    for link_text, url in markdown_links:
-        # Look for this URL in our articles_dict
-        for article_id, article_data in articles_dict.items():
-            if article_data["article_url"] == url:
-                sources = article_data["sources"]
-
-                # Parse sources and organize by type - only Reddit and HackerNews
-                sources_info = {"reddit": [], "hackernews": []}
-
-                for source in sources:
-                    parser = source["parser"]
-                    thread_url = source["thread_url"]
-                    subset = source.get("subset")
-
-                    if thread_url:
-                        if parser == "reddit":
-                            sources_info["reddit"].append(
-                                {"url": thread_url, "subset": subset}
-                            )
-                        elif parser == "hackernews":
-                            sources_info["hackernews"].append(thread_url)
-
-                # Only add articles that have Reddit or HackerNews threads
-                if sources_info["reddit"] or sources_info["hackernews"]:
-                    referenced_articles.append(
-                        {"title": link_text, "url": url, "sources": sources_info}
-                    )
-                break
-
-    return referenced_articles
-
-
-def build_discussion_threads_section(referenced_articles: list) -> str:
-    """Build the discussion threads section for referenced articles"""
-    if not referenced_articles:
-        return ""
-
-    sections = ["## Discussion Threads", ""]
-
-    for article in referenced_articles:
-        title = article["title"]
-        url = article["url"]
-        sources = article["sources"]
-
-        # Add main article link
-        sections.append(f"- [{title}]({url})")
-
-        # Add Reddit threads first
-        for reddit_info in sources["reddit"]:
-            subset = reddit_info["subset"]
-            reddit_url = reddit_info["url"]
-            subreddit_display = f"r/{subset}" if subset else "Reddit"
-            sections.append(f"  - [{subreddit_display}]({reddit_url})")
-
-        # Add HackerNews threads second
-        for hn_url in sources["hackernews"]:
-            sections.append(f"  - [HackerNews Discussion]({hn_url})")
-
-        sections.append("")
-
-    return "\n".join(sections)
-
-
-def run_summary_generator(hours_back: int, min_relevance_score: int):
-    """Generate summary from database articles"""
-    print("Running summary generator...")
-
-    try:
-        # Initialize database
-        create_database()
-
-        # Get recent articles with specified min relevance score
-        articles_dict = get_recent_articles(hours_back, min_relevance_score)
-
-        if not articles_dict:
-            print("No articles found in database!")
-            return
-
-        print(f"Found {len(articles_dict)} unique articles to summarize")
-
-        # Generate summary
-        summary, article_mapping = generate_summary_with_sources(articles_dict)
-
-        # Extract which articles were actually referenced
-        referenced_articles = extract_referenced_articles(summary, articles_dict)
-
-        # Build discussion threads section
-        discussion_section = build_discussion_threads_section(referenced_articles)
-
-        # Create report markdown with timestamp
-        now = datetime.now()
-        date_str = now.strftime("%Y-%m-%d")
-        timestamp_str = now.strftime("%H%M%S")
-
-        report_content = (
-            f"# AI Daily News Report - {date_str}\n\n## Summary\n\n{summary}\n"
+        print(
+            f"Fetching articles for category: {category_name_log} (ID: {category_id})..."
         )
+        articles = get_recent_articles(hours_back, min_relevance_score, category_id)
 
-        if discussion_section:
-            report_content += f"\n{discussion_section}\n"
+        if not articles:
+            print(f"No articles found for {category_name_log}.")
+            continue
 
-        # Save summary with timestamp
-        output_file = Path("data") / f"{date_str}-{timestamp_str}.md"
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(report_content)
+        articles_for_prompt = []
+        for article_id, data in articles.items():
+            article_url = data.get("article_url")
+            sources = data.get("sources", [])
 
-        print(f"Summary generated and saved to {output_file}")
-        print(f"Referenced {len(referenced_articles)} articles with discussion threads")
+            if not article_url:
+                continue
 
-    except Exception as e:
-        print(f"Summary generation failed: {e}")
-        raise
+            titles = list()
+            contents = list()
+
+            for source in sources:
+                title = (source.get("title") or "").strip()
+                truncated_title = title[:200] if len(title) > 200 else title
+                titles.append(truncated_title)
+
+                content = (source.get("content") or "").strip()
+                truncated_content = content[:200] if len(content) > 200 else content
+                contents.append(truncated_content)
+
+            unique_titles = set(titles)
+            unique_contents = set(contents)
+
+            combined_title = " | ".join(unique_titles)
+            combined_content = " | ".join(unique_contents)
+
+            articles_for_prompt.append(
+                f"Article_url: {article_url}\nTitle: {combined_title or "-"}\nContent: {combined_content or "-"}"
+            )
+
+        if not articles_for_prompt:
+            print(f"No valid content to summarize for {category_name_log}.")
+            continue
+
+        content_for_prompt = "\n\n---\n\n".join(articles_for_prompt)
+
+        prompt = s.substitute(content=content_for_prompt)
+
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.4,
+                    response_mime_type="application/json",
+                    response_schema={
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                ),
+            )
+
+            # The API returns a text string that is a JSON array. Parse it.
+            bullet_points = json.loads(response.text or "[]")
+
+            markdown_summary += f"### {category_names[language]}\n\n"
+            for bp in bullet_points[:10]:
+                markdown_summary += f"- {bp}\n"
+            markdown_summary += "\n"
+        except Exception as e:
+            print(f"Error generating summary for {category_name_log}: {e}")
+            markdown_summary += f"### {category_name_log}\n\n*Could not generate summary for this category due to an error.*\n\n"
+
+    write_markdown_content(markdown_summary, language)

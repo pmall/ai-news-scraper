@@ -116,8 +116,14 @@ def main():
         required=True,
         help="Min relevance score.",
     )
+    parser_summary.add_argument(
+        "--language",
+        type=str,
+        required=True,
+        help="Summary language (en|fr]).",
+    )
     parser_summary.set_defaults(
-        func=lambda args: run_summary_generator(args.hb, args.score)
+        func=lambda args: run_summary_generator(args.hb, args.score, args.language)
     )
 
     args = parser.parse_args()
