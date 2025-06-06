@@ -1,11 +1,11 @@
 import os
 import json
 import datetime
-from google import genai
+from string import Template
 from google.genai import types
+from readonly_ai.utils import setup_gemini
 from readonly_ai.prompts import SUMMARY_PROMPT_TEMPLATE_EN, SUMMARY_PROMPT_TEMPLATE_FR
 from readonly_ai.database import create_database, get_recent_articles
-from string import Template
 
 CATEGORIES = {
     1: {"en": "New Models & Releases", "fr": "Nouveaux modèles et versions"},
@@ -34,15 +34,6 @@ def prompt_template(language: str) -> str:
         return SUMMARY_PROMPT_TEMPLATE_FR
     else:
         raise ValueError("unsupported language")
-
-
-# Setup gemini client
-def setup_gemini():
-    """Initializes and returns the Gemini API client."""
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY environment variable is required")
-    return genai.Client(api_key=GEMINI_API_KEY)
 
 
 def write_markdown_content(markdown_summary: str, language: str):

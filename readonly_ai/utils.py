@@ -1,3 +1,34 @@
+import os
+import praw
+from google import genai
+
+
+def setup_reddit():
+    """Setup Reddit API connection"""
+    REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
+    REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
+
+    if not REDDIT_CLIENT_ID:
+        raise ValueError("REDDIT_CLIENT_ID environment variable is required")
+
+    if not REDDIT_CLIENT_SECRET:
+        raise ValueError("REDDIT_CLIENT_SECRET environment variable is required")
+
+    return praw.Reddit(
+        client_id=REDDIT_CLIENT_ID,
+        client_secret=REDDIT_CLIENT_SECRET,
+        user_agent="readonly-ai/1.0",
+    )
+
+
+def setup_gemini():
+    """Initializes and returns the Gemini API client."""
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY environment variable is required")
+    return genai.Client(api_key=GEMINI_API_KEY)
+
+
 # File extensions to exclude (not webpages)
 EXCLUDED_EXTENSIONS = {
     ".jpg",

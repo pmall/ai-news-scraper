@@ -3,31 +3,21 @@ AI Article Analyzer
 Scores articles, categorizes them, and extracts tags using Gemini Flash
 """
 
-import os
 import json
 import time
-from google import genai
+from string import Template
 from google.genai import types
+from readonly_ai.utils import setup_gemini
 from readonly_ai.prompts import SCORING_PROMPT_TEMPLATE
 from readonly_ai.database import (
     create_database,
     get_unanalysed_articles,
     insert_article_analysis,
 )
-from string import Template
 
 # Batch size for processing articles
 BATCH_SIZE = 20
 MAX_CONSECUTIVE_FAILURES = 3
-
-
-# Setup gemini client
-def setup_gemini():
-    """Initializes and returns the Gemini API client."""
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY environment variable is required")
-    return genai.Client(api_key=GEMINI_API_KEY)
 
 
 def create_scoring_prompt(articles: list[tuple[str, str, str]]) -> str:
