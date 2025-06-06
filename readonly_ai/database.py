@@ -53,7 +53,7 @@ POSTGRES_QUERIES = {
         ORDER BY a.date DESC
     """,
     "GET_UNANALYSED_ARTICLES": """
-        SELECT a.article_id, a.title, a.content FROM articles a
+        SELECT a.article_id, a.title, a.content, a.article_url FROM articles a
         LEFT JOIN articles_analyses aa ON a.article_id = aa.article_id
         WHERE aa.article_id IS NULL ORDER BY a.date DESC
     """,
@@ -287,6 +287,7 @@ def get_recent_articles(
         query_params["hours_back_delta_str"] = f"-{hours_back} hours"
 
     sql_query = text(QUERIES["GET_RECENT_ARTICLES"])
+
     result_dict: dict[str, dict] = {}
 
     try:
@@ -305,22 +306,39 @@ def get_recent_articles(
     return result_dict
 
 
-def get_unanalysed_articles(limit: Optional[int] = None) -> list[tuple[str, str, str]]:
-    """Get articles with no entry in articles_analyses table"""
-    sql_query = QUERIES["GET_UNANALYSED_ARTICLES"]
+def get_unanalysed_articles(limit: Optional[int] = None) -> dict[str, dict[str, Any]]:
+    """Get unanalysed articles, grouped by article_id."""
+    sql_query_base = QUERIES["GET_UNANALYSED_ARTICLES"]
     query_params: dict[str, Any] = {}
 
     if limit is not None:
-        sql_query += " LIMIT :limit_val"
+        sql_query_final = sql_query_base + " LIMIT :limit_val"
         query_params["limit_val"] = limit
+    else:
+        sql_query_final = sql_query_base
+
+    result_dict: dict[str, dict[str, Any]] = {}
 
     try:
         with get_database_engine().connect() as conn:
-            result = conn.execute(text(sql_query), query_params).fetchall()
-            return [(str(row[0]), str(row[1]), str(row[2])) for row in result]
+            rows = (
+                conn.execute(text(sql_query_final), query_params).mappings().fetchall()
+            )
+            for row in rows:
+                article_id = row["article_id"]
+                if article_id not in result_dict:
+                    result_dict[article_id] = {
+                        "article_url": row["article_url"],
+                        "sources": [],
+                    }
+                result_dict[article_id]["sources"].append(
+                    {"title": row["title"], "content": row["content"]}
+                )
     except SQLAlchemyError as e:
         print(f"Database error in get_unanalysed_articles: {e}")
-        return []
+        return {}
+
+    return result_dict
 
 
 def insert_article_analysis(analyses: list[tuple[str, int, int, list[str]]]) -> int:

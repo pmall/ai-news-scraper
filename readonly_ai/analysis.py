@@ -23,20 +23,18 @@ MAX_CONSECUTIVE_FAILURES = 3
 
 # Setup gemini client
 def setup_gemini():
+    """Initializes and returns the Gemini API client."""
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
     if not GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY environment variable is required")
-
-    return genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    return genai.Client(api_key=GEMINI_API_KEY)
 
 
 def create_scoring_prompt(articles: list[tuple[str, str, str]]) -> str:
-    """Create prompt for Gemini to analyze articles"""
+    """Create prompt for Gemini to analyze articles."""
     s = Template(SCORING_PROMPT_TEMPLATE)
 
     lines = []
-
     for i, (article_id, title, content) in enumerate(articles):
         # Truncate content to avoid token limits
         truncated_title = title[:500] + "..." if len(title) > 500 else title
@@ -46,31 +44,23 @@ def create_scoring_prompt(articles: list[tuple[str, str, str]]) -> str:
         )
 
     prompt = s.substitute(articles="\n\n".join(lines), n=len(lines))
-
     return prompt
 
 
 def analyze_articles_batch(articles: list[tuple[str, str, str]]) -> list[dict]:
-    """Analyze a batch of articles using Gemini (score, categorize, tag)"""
+    """Analyze a batch of articles using Gemini (score, categorize, tag)."""
     client = setup_gemini()
-
     try:
         prompt = create_scoring_prompt(articles)
 
-        # Define the expected schema for the response
         response_schema = {
             "type": "array",
             "items": {
                 "type": "object",
                 "properties": {
-                    "score": {"type": "integer", "minimum": 0, "maximum": 100},
-                    "category": {"type": "integer", "minimum": 1, "maximum": 6},
-                    "tags": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "minItems": 3,
-                        "maxItems": 8,
-                    },
+                    "score": {"type": "integer"},
+                    "category": {"type": "integer"},
+                    "tags": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": ["score", "category", "tags"],
             },
@@ -87,58 +77,22 @@ def analyze_articles_batch(articles: list[tuple[str, str, str]]) -> list[dict]:
             ),
         )
 
-        # Parse the structured output
         analyses = json.loads(str(response.text).strip())
 
-        # Validate analyses
         if not isinstance(analyses, list) or len(analyses) != len(articles):
             print(
-                f"Invalid analyses format: expected {len(articles)} analyses, got {len(analyses) if isinstance(analyses, list) else 'non-list'}"
+                f"Invalid analyses format: expected {len(articles)}, got {len(analyses) if isinstance(analyses, list) else 'non-list'}"
             )
             return []
 
-        # Validate each analysis
         validated_analyses = []
         for i, analysis in enumerate(analyses):
-            if not isinstance(analysis, dict):
-                print(f"Analysis {i+1} is not a dict: {analysis}")
-                return []
-
-            # Validate score
-            score = analysis.get("score")
-            if not isinstance(score, (int, float)) or not (0 <= score <= 100):
-                print(f"Invalid score in analysis {i+1}: {score}")
-                return []
-
-            # Validate category
-            category = analysis.get("category")
-            if not isinstance(category, int) or not (1 <= category <= 6):
-                print(f"Invalid category in analysis {i+1}: {category}")
-                return []
-
-            # Validate tags
-            tags = analysis.get("tags")
-            if not isinstance(tags, list) or not all(
-                isinstance(tag, str) for tag in tags
+            if not isinstance(analysis, dict) or not all(
+                k in analysis for k in ["score", "category", "tags"]
             ):
-                print(f"Invalid tags in analysis {i+1}: {tags}")
-                return []
-
-            if not (3 <= len(tags) <= 8):
-                print(
-                    f"Invalid number of tags in analysis {i+1}: {len(tags)} (should be 3-8)"
-                )
-                return []
-
-            validated_analyses.append(
-                {
-                    "score": int(score),
-                    "category": int(category),
-                    "tags": [
-                        tag.strip().lower() for tag in tags if tag.strip()
-                    ],  # Clean tags
-                }
-            )
+                print(f"Analysis {i+1} is missing required keys: {analysis}")
+                continue
+            validated_analyses.append(analysis)
 
         return validated_analyses
 
@@ -148,28 +102,45 @@ def analyze_articles_batch(articles: list[tuple[str, str, str]]) -> list[dict]:
 
 
 def run_article_analysis():
-    """Article analysis loop (scoring, categorization, tagging)"""
+    """Article analysis loop (scoring, categorization, tagging)."""
     print("Starting AI article analysis (scoring, categorization, tagging)...")
 
     try:
-        # Initialize database
         create_database()
-
         consecutive_failures = 0
         total_analyzed = 0
 
         while consecutive_failures < MAX_CONSECUTIVE_FAILURES:
-            # Get unanalysed articles
-            unanalysed = get_unanalysed_articles(BATCH_SIZE)
+            unanalysed_dict = get_unanalysed_articles(BATCH_SIZE)
 
-            if not unanalysed:
+            if not unanalysed_dict:
                 print("No more unanalyzed articles found.")
                 break
 
-            print(f"Processing batch of {len(unanalysed)} articles...")
+            print(f"Processing batch of {len(unanalysed_dict)} unique articles...")
 
-            # Analyze the batch
-            analyses = analyze_articles_batch(unanalysed)
+            # Transform the dictionary into the list format expected by the analysis functions.
+            # Concatenate unique titles and contents for each article_id.
+            articles_to_process = []
+            for article_id, data in unanalysed_dict.items():
+                sources = data.get("sources", [])
+
+                # Get unique, non-empty titles and contents
+                unique_titles = sorted(
+                    list(set(s["title"] for s in sources if s.get("title")))
+                )
+                unique_contents = sorted(
+                    list(set(s["content"] for s in sources if s.get("content")))
+                )
+
+                combined_title = " | ".join(unique_titles)
+                combined_content = " | ".join(unique_contents)
+
+                articles_to_process.append(
+                    (article_id, combined_title, combined_content)
+                )
+
+            analyses = analyze_articles_batch(articles_to_process)
 
             if not analyses:
                 consecutive_failures += 1
@@ -181,12 +152,10 @@ def run_article_analysis():
                     time.sleep(5)
                 continue
 
-            # Reset failure counter on success
             consecutive_failures = 0
-
-            # Prepare analysis data for database insertion
             analysis_data = []
-            for i, (article_id, title, content) in enumerate(unanalysed):
+            # Use the transformed 'articles_to_process' list to match analyses with article_ids
+            for i, (article_id, _, _) in enumerate(articles_to_process):
                 if i < len(analyses):
                     analysis = analyses[i]
                     analysis_data.append(
@@ -198,14 +167,12 @@ def run_article_analysis():
                         )
                     )
 
-            # Insert analyses into database
             inserted_count = insert_article_analysis(analysis_data)
             total_analyzed += inserted_count
-
             print(f"Inserted {inserted_count} article analyses")
 
-            # Show some examples
-            for i, (article_id, title, content) in enumerate(unanalysed[:3]):
+            # Show some examples from the processed list
+            for i, (article_id, title, content) in enumerate(articles_to_process[:3]):
                 if i < len(analyses):
                     analysis = analyses[i]
                     category_names = {
@@ -222,22 +189,20 @@ def run_article_analysis():
                     )
                     print(f"    Title: {title[:60]}...")
 
-            # Brief pause between batches
             time.sleep(1)
 
         if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
             print(f"Stopping after {MAX_CONSECUTIVE_FAILURES} consecutive API failures")
 
-        print(f"Analysis complete. Total articles analyzed: {total_analyzed}")
+        print(f"\nAnalysis complete. Total articles analyzed: {total_analyzed}")
 
-        # Show final stats
-        remaining_unanalysed = get_unanalysed_articles(1)
-        if remaining_unanalysed:
-            remaining_count = len(get_unanalysed_articles())
-            print(f"Remaining unanalyzed articles: {remaining_count}")
+        # Final stats check
+        remaining_unanalysed_count = len(get_unanalysed_articles())
+        if remaining_unanalysed_count > 0:
+            print(f"Remaining unanalyzed articles: {remaining_unanalysed_count}")
         else:
             print("All articles have been analyzed!")
 
     except Exception as e:
-        print(f"Articles analysis failed: {e}")
+        print(f"Article analysis failed: {e}")
         raise
